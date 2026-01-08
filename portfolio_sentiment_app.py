@@ -190,7 +190,7 @@ def extract_keywords(text, n_words=15):
         'you', 'your', 'he', 'him', 'his', 'she', 'her', 'hers', 'i', 'me', 
         'my', 'mine', 'thank', 'thanks', 'good', 'day', 'now', 'bye', 'welcome',
         'hello', 'hi', 'ladies', 'gentlemen', 'everyone', 'conclude', 'concludes',
-        'disconnect', 'today', 'call', 'conference'
+        'disconnect', 'today', 'call', 'conference', 'thank', 'think', 'year'
     }
     
     words = re.findall(r'\b[a-z]{3,}\b', text)
@@ -422,8 +422,8 @@ def plot_sentiment_comparison_radar(df):
 # ======================== Streamlit 메인 앱 ========================
 
 def main():
-    st.title("📊 포트폴리오 감정 분석 시스템")
-    st.markdown("Transformer 기반 최신 NLP 모델을 활용한 금융 텍스트 감정 분석")
+    st.title("📊 Portfolio Sentiment Analysis")
+    st.markdown("Transformer 기반 텍스트 센티먼트")
     
     # 사이드바 설정
     st.sidebar.markdown("## ⚙️ 설정")
@@ -525,7 +525,7 @@ def main():
         if st.session_state.analysis_complete:
             df = st.session_state.analysis_df
             
-            st.success("✅ 감정 분석 완료!")
+            st.success("✅ 센티먼트 분석 완료!")
             
             # ==================== 메트릭 대시보드 ====================
             st.markdown("---")
@@ -565,7 +565,7 @@ def main():
                 )
             
             # Top 5 종목 표시
-            st.markdown("### 🏆 감정 점수 Top 5 종목")
+            st.markdown("### 🏆 센티먼트 Top 5")
             top5 = df.nlargest(5, 'Sentiment_Score')[['Equity', 'Sentiment_Score', 'Sentiment']]
             
             cols = st.columns(5)
@@ -577,7 +577,7 @@ def main():
             
             # ==================== 시각화 ====================
             st.markdown("---")
-            st.subheader("📈 감정 분석 시각화")
+            st.subheader("📈 센티먼트 분석 상세")
             
             tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
                 "감정 분포", "종목 점수", "상위 종목 비교", "워드클라우드", "문서 분석", "상세 분석"
@@ -612,22 +612,22 @@ def main():
                 
                 wc_option = st.radio(
                     "워드클라우드 유형 선택",
-                    options=["감정별", "종목별"],
+                    options=["센티먼트별", "종목별"],
                     horizontal=True
                 )
                 
-                if wc_option == "감정별":
+                if wc_option == "센티먼트별":
                     sentiment_filter = st.selectbox(
-                        "감정 선택",
+                        "센티먼트 선택",
                         options=["전체"] + df['Sentiment'].unique().tolist()
                     )
                     
                     if sentiment_filter == "전체":
                         text_data = ' '.join(df['Combined_Text'].tolist())
-                        title = "전체 워드클라우드"
+                        title = "All Word Cloud"
                     else:
                         text_data = ' '.join(df[df['Sentiment'] == sentiment_filter]['Combined_Text'].tolist())
-                        title = f"{sentiment_filter} 워드클라우드"
+                        title = f"{sentiment_filter} Word Cloud"
                     
                     wordcloud_fig = plot_wordcloud(text_data, title)
                     if wordcloud_fig:
