@@ -642,7 +642,7 @@ def main():
                     )
                     
                     text_data = df[df['Equity'] == equity_filter]['Combined_Text'].iloc[0]
-                    title = f"{equity_filter} 워드클라우드"
+                    title = f"{equity_filter} Word Cloud"
                     
                     wordcloud_fig = plot_wordcloud(text_data, title)
                     if wordcloud_fig:
