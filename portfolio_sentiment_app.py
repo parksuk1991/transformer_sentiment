@@ -280,26 +280,11 @@ def plot_equity_sentiment_scores(df):
     )
     
     return fig
-
+    
 def plot_wordcloud(text, title="워드클라우드"):
     """워드클라우드 생성"""
     if not text or len(text.strip()) < 10:
         return None
-    
-    # stop_words 정의 추가
-    stop_words = {
-        'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-        'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
-        'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
-        'should', 'may', 'might', 'must', 'can', 'that', 'this', 'as', 'if',
-        'it', 'its', 'which', 'who', 'what', 'when', 'where', 'why', 'how',
-        'all', 'each', 'every', 'both', 'either', 'neither', 'such', 'same',
-        'so', 'than', 'then', 'they', 'them', 'their', 'we', 'us', 'our',
-        'you', 'your', 'he', 'him', 'his', 'she', 'her', 'hers', 'i', 'me', 
-        'my', 'mine', 'thank', 'thanks', 'good', 'day', 'now', 'bye', 'welcome',
-        'hello', 'hi', 'ladies', 'gentlemen', 'everyone', 'conclude', 'concludes',
-        'disconnect', 'today', 'call', 'conference', 'think', 'year'
-    }
     
     wordcloud = WordCloud(
         width=800,
@@ -308,8 +293,7 @@ def plot_wordcloud(text, title="워드클라우드"):
         colormap='viridis',
         max_words=100,
         relative_scaling=0.5,
-        min_font_size=10,
-        stopwords=stop_words  # 이 줄 추가
+        min_font_size=10
     ).generate(text)
     
     fig, ax = plt.subplots(figsize=(12, 6))
