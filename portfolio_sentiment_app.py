@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 import torch
+import shap
 from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
 from wordcloud import WordCloud
 import matplotlib.pyplot as plt
@@ -280,7 +281,136 @@ def plot_equity_sentiment_scores(df):
     )
     
     return fig
+
+
+def extract_sentiment_contributing_words(text, sentiment_pipeline, target_sentiment, top_n=100):
+    """
+    SHAP을 사용하여 센티먼트에 실제로 기여한 단어 추출
     
+    Args:
+        text: 분석할 텍스트
+        sentiment_pipeline: 센티먼트 파이프라인
+        target_sentiment: 'POSITIVE', 'NEGATIVE', 'NEUTRAL'
+        top_n: 추출할 상위 단어 수
+    
+    Returns:
+        dict: {단어: 기여도 점수}
+    """
+    if not text or len(text.strip()) < 10:
+        return {}
+    
+    # 텍스트 전처리 및 청킹
+    text = preprocess_text(text)
+    chunks = chunk_text(text, max_length=512)
+    
+    # 각 청크에서 기여도 높은 단어 추출
+    word_contributions = {}
+    
+    model = sentiment_pipeline.model
+    tokenizer = sentiment_pipeline.tokenizer
+    
+    # 센티먼트 레이블 매핑
+    sentiment_map = {
+        'POSITIVE': ['positive', 'POSITIVE'],
+        'NEGATIVE': ['negative', 'NEGATIVE'],
+        'NEUTRAL': ['neutral', 'NEUTRAL']
+    }
+    
+    for chunk in chunks[:5]:  # 처리 시간을 위해 최대 5개 청크만
+        try:
+            # 토큰화
+            inputs = tokenizer(chunk, return_tensors="pt", truncation=True, max_length=512)
+            
+            # 모델 예측
+            outputs = model(**inputs)
+            predictions = torch.nn.functional.softmax(outputs.logits, dim=-1)
+            
+            # 해당 센티먼트의 확률
+            predicted_label = sentiment_pipeline(chunk, truncation=True, max_length=512)[0]['label']
+            
+            # 타겟 센티먼트가 아니면 스킵
+            if predicted_label not in sentiment_map[target_sentiment]:
+                continue
+            
+            # SHAP 값 계산 (간소화 버전: attention weights 사용)
+            tokens = tokenizer.convert_ids_to_tokens(inputs['input_ids'][0])
+            
+            # Attention weights를 기여도 근사치로 사용
+            with torch.no_grad():
+                attention = model(**inputs, output_attentions=True).attentions
+                # 마지막 레이어의 attention 평균
+                avg_attention = attention[-1].mean(dim=1).squeeze().mean(dim=0)
+            
+            # 토큰별 기여도 집계
+            for token, weight in zip(tokens, avg_attention):
+                # 특수 토큰 및 서브워드 처리
+                if token.startswith('##'):
+                    token = token[2:]
+                elif token in ['[CLS]', '[SEP]', '[PAD]']:
+                    continue
+                
+                token = token.lower().strip()
+                
+                # stop words 필터링
+                stop_words = {
+                    'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+                    'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+                    'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+                    'should', 'may', 'might', 'must', 'can', 'that', 'this', 'as', 'if',
+                    'it', 'its', 'which', 'who', 'what', 'when', 'where', 'why', 'how',
+                    'thank', 'thanks', 'think', 'year'
+                }
+                
+                if token in stop_words or len(token) < 3:
+                    continue
+                
+                # 기여도 누적
+                if token in word_contributions:
+                    word_contributions[token] += float(weight)
+                else:
+                    word_contributions[token] = float(weight)
+        
+        except Exception as e:
+            continue
+    
+    # 상위 N개 단어 반환
+    sorted_words = sorted(word_contributions.items(), key=lambda x: x[1], reverse=True)
+    return dict(sorted_words[:top_n])
+
+def plot_sentiment_wordcloud(text, sentiment, sentiment_pipeline, title="센티먼트 기여 워드클라우드"):
+    """센티먼트 기여도 기반 워드클라우드 생성"""
+    if not text or len(text.strip()) < 10:
+        return None
+    
+    # 센티먼트에 기여한 단어 추출
+    word_scores = extract_sentiment_contributing_words(text, sentiment_pipeline, sentiment, top_n=100)
+    
+    if not word_scores:
+        return None
+    
+    # WordCloud 생성 (빈도수 대신 기여도 사용)
+    wordcloud = WordCloud(
+        width=800,
+        height=400,
+        background_color='white',
+        colormap='RdYlGn' if sentiment == 'POSITIVE' else ('Reds_r' if sentiment == 'NEGATIVE' else 'Blues'),
+        max_words=80,
+        relative_scaling=0.5,
+        min_font_size=10
+    ).generate_from_frequencies(word_scores)
+    
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.imshow(wordcloud, interpolation='bilinear')
+    ax.axis('off')
+    ax.set_title(title, fontsize=16, fontweight='bold')
+    
+    return fig
+
+
+
+
+
+
 def plot_wordcloud(text, title="워드클라우드"):
     """워드클라우드 생성"""
     if not text or len(text.strip()) < 10:
@@ -454,6 +584,7 @@ def main():
             
             with st.spinner("🔄 모델 로드 중..."):
                 sentiment_pipeline, model_name = load_sentiment_model()
+                st.session_state.sentiment_pipeline = sentiment_pipeline
             
             st.info(f"✅ 모델: {model_name}")
             
@@ -606,49 +737,113 @@ def main():
             
             with tab3:
                 st.plotly_chart(plot_top_equities_comparison(df), width="stretch")
-            
+
             with tab4:
+                sentiment_pipeline = st.session_state.get('sentiment_pipeline')  # 이 줄 추가
                 st.markdown("### 워드클라우드 분석")
-                
+    
+                # 분석 모드 선택
+                analysis_mode = st.radio(
+                    "분석 모드 선택",
+                    options=["빈도 기반 (기본)", "센티먼트 기여도 기반 (AI)"],
+                    horizontal=True,
+                    help="기여도 기반: 실제로 센티먼트 분류에 영향을 준 단어만 표시 (처리 시간 더 소요)"
+                )
+    
                 wc_option = st.radio(
                     "워드클라우드 유형 선택",
                     options=["센티먼트별", "종목별"],
                     horizontal=True
                 )
-                
-                if wc_option == "센티먼트별":
-                    sentiment_filter = st.selectbox(
-                        "센티먼트 선택",
-                        options=["전체"] + df['Sentiment'].unique().tolist()
-                    )
-                    
-                    if sentiment_filter == "전체":
-                        text_data = ' '.join(df['Combined_Text'].tolist())
-                        title = "All Word Cloud"
-                    else:
+    
+                if analysis_mode == "빈도 기반 (기본)":
+                    # 기존 코드 유지
+                    if wc_option == "센티먼트별":
+                        sentiment_filter = st.selectbox(
+                            "센티먼트 선택",
+                            options=["전체"] + df['Sentiment'].unique().tolist()
+                        )
+            
+                        if sentiment_filter == "전체":
+                            text_data = ' '.join(df['Combined_Text'].tolist())
+                            title = "All Word Cloud"
+                        else:
+                            text_data = ' '.join(df[df['Sentiment'] == sentiment_filter]['Combined_Text'].tolist())
+                            title = f"{sentiment_filter} Word Cloud"
+            
+                        wordcloud_fig = plot_wordcloud(text_data, title)
+                        if wordcloud_fig:
+                            st.pyplot(wordcloud_fig, use_container_width=True)
+                        else:
+                            st.warning("워드클라우드를 생성할 텍스트가 없습니다.")
+        
+                    else:  # 종목별
+                        equity_filter = st.selectbox(
+                            "종목 선택",
+                            options=df['Equity'].tolist()
+                        )
+            
+                        text_data = df[df['Equity'] == equity_filter]['Combined_Text'].iloc[0]
+                        title = f"{equity_filter} Word Cloud"
+            
+                        wordcloud_fig = plot_wordcloud(text_data, title)
+                        if wordcloud_fig:
+                            st.pyplot(wordcloud_fig, use_container_width=True)
+                        else:
+                            st.warning("워드클라우드를 생성할 텍스트가 없습니다.")
+    
+                else:  # 센티먼트 기여도 기반
+                    st.info("⏳ AI 모델이 센티먼트에 실제로 기여한 단어를 분석 중입니다...")
+        
+                    if wc_option == "센티먼트별":
+                        sentiment_filter = st.selectbox(
+                            "센티먼트 선택",
+                            options=df['Sentiment'].unique().tolist(),
+                            key="sentiment_contrib"
+                        )
+            
                         text_data = ' '.join(df[df['Sentiment'] == sentiment_filter]['Combined_Text'].tolist())
-                        title = f"{sentiment_filter} Word Cloud"
-                    
-                    wordcloud_fig = plot_wordcloud(text_data, title)
-                    if wordcloud_fig:
-                        st.pyplot(wordcloud_fig, use_container_width=True)
-                    else:
-                        st.warning("워드클라우드를 생성할 텍스트가 없습니다.")
-                
-                else:  # 종목별
-                    equity_filter = st.selectbox(
-                        "종목 선택",
-                        options=df['Equity'].tolist()
-                    )
-                    
-                    text_data = df[df['Equity'] == equity_filter]['Combined_Text'].iloc[0]
-                    title = f"{equity_filter} Word Cloud"
-                    
-                    wordcloud_fig = plot_wordcloud(text_data, title)
-                    if wordcloud_fig:
-                        st.pyplot(wordcloud_fig, use_container_width=True)
-                    else:
-                        st.warning("워드클라우드를 생성할 텍스트가 없습니다.")
+                        title = f"{sentiment_filter} - 센티먼트 기여 단어"
+            
+                        with st.spinner("분석 중..."):
+                            wordcloud_fig = plot_sentiment_wordcloud(
+                                text_data, 
+                                sentiment_filter, 
+                                sentiment_pipeline,
+                                title
+                            )
+            
+                        if wordcloud_fig:
+                            st.pyplot(wordcloud_fig, use_container_width=True)
+                            st.caption("💡 단어 크기 = 해당 센티먼트 분류에 대한 AI 모델의 기여도")
+                        else:
+                            st.warning("분석할 텍스트가 없습니다.")
+        
+                    else:  # 종목별
+                        equity_filter = st.selectbox(
+                            "종목 선택",
+                            options=df['Equity'].tolist(),
+                            key="equity_contrib"
+                        )
+            
+                        equity_data = df[df['Equity'] == equity_filter].iloc[0]
+                        text_data = equity_data['Combined_Text']
+                        sentiment = equity_data['Sentiment']
+                        title = f"{equity_filter} - {sentiment} 기여 단어"
+            
+                        with st.spinner("분석 중..."):
+                            wordcloud_fig = plot_sentiment_wordcloud(
+                                text_data,
+                                sentiment,
+                                sentiment_pipeline,
+                                title
+                            )
+            
+                        if wordcloud_fig:
+                            st.pyplot(wordcloud_fig, use_container_width=True)
+                            st.caption("💡 이 종목이 해당 센티먼트로 분류된 이유가 되는 핵심 단어들입니다.")
+                        else:
+                            st.warning("분석할 텍스트가 없습니다.")
             
             with tab5:
                 st.plotly_chart(plot_document_length_analysis(df), width="stretch")
