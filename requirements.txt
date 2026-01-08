@@ -21,5 +21,5 @@ python-dotenv
 tqdm
 pyyaml
 urllib3
-curl-cffi
 certifi
+shap
