@@ -76,7 +76,7 @@ def load_sentiment_model():
             sentiment_pipeline = pipeline("sentiment-analysis",
                                          model="distilbert-base-uncased-finetuned-sst-2-english",
                                          device=0 if torch.cuda.is_available() else -1)
-            return sentiment_pipeline, "DistilBERT (일반 감정분석)"
+            return sentiment_pipeline, "DistilBERT (일반 센티먼트 분석)"
         except:
             sentiment_pipeline = pipeline("sentiment-analysis",
                                          device=0 if torch.cuda.is_available() else -1)
@@ -116,7 +116,7 @@ def chunk_text(text, max_length=512):
 
 def analyze_sentiment_for_equity(text, sentiment_pipeline):
     """
-    종목별 전체 텍스트에 대한 감정 분석
+    종목별 전체 텍스트에 대한 센티먼트 분석
     
     점수 계산 방식:
     1. 텍스트를 512토큰 단위로 청킹
@@ -217,7 +217,7 @@ def calculate_equity_ranking(equity_df):
 # ======================== 시각화 함수 ========================
 
 def plot_sentiment_distribution(df):
-    """감정 분포 시각화"""
+    """센티먼트 분포 시각화"""
     sentiment_counts = df['Sentiment'].value_counts()
     
     colors = {
@@ -237,9 +237,9 @@ def plot_sentiment_distribution(df):
     ])
     
     fig.update_layout(
-        title="전체 감정 분포",
-        xaxis_title="감정 분류",
-        yaxis_title="종목 수",
+        title="전체 센티먼트 분포",
+        xaxis_title="센티먼트 분류",
+        yaxis_title="종목수",
         template="plotly_white",
         height=400
     )
@@ -247,7 +247,7 @@ def plot_sentiment_distribution(df):
     return fig
 
 def plot_equity_sentiment_scores(df):
-    """종목별 감정 점수 시각화"""
+    """종목별 센티먼트 점수 시각화"""
     df_sorted = df.sort_values('Sentiment_Score', ascending=False)
     
     colors = df_sorted['Sentiment_Score'].apply(
@@ -271,9 +271,9 @@ def plot_equity_sentiment_scores(df):
                   annotation_text="부정 기준선 (-0.2)")
     
     fig.update_layout(
-        title="종목별 감정 점수 (높을수록 긍정적)<br><sub>긍정 기준: >0.2 | 부정 기준: <-0.2 | 중립: -0.2~0.2</sub>",
+        title="종목별 센티먼트 (높을수록 긍정적)<br><sub>긍정 기준: >0.2 | 부정 기준: <-0.2 | 중립: -0.2~0.2</sub>",
         xaxis_title="종목",
-        yaxis_title="감정 점수",
+        yaxis_title="센티먼트",
         template="plotly_white",
         height=500,
         showlegend=False
@@ -315,7 +315,7 @@ def plot_top_equities_comparison(df, top_n=10):
     
     fig = make_subplots(
         rows=1, cols=2,
-        subplot_titles=("감정 점수 Top 10", "투자 선호도 분포"),
+        subplot_titles=("센티먼트 Top 10", "투자 선호도 분포"),
         specs=[[{"type": "bar"}, {"type": "pie"}]]
     )
     
@@ -357,8 +357,8 @@ def plot_document_length_analysis(df):
         color='Sentiment',
         size='Text_Length',
         hover_data=['Equity'],
-        title="문서 길이와 감정 점수의 관계",
-        labels={'Text_Length': '문서 길이 (문자 수)', 'Sentiment_Score': '감정 점수'},
+        title="문서 길이 vs 센티먼트",
+        labels={'Text_Length': '문서 길이 (문자 수)', 'Sentiment_Score': '센티먼트'},
         color_discrete_map={'POSITIVE': '#28a745', 'NEGATIVE': '#dc3545', 'NEUTRAL': '#6c757d'}
     )
     
@@ -366,7 +366,7 @@ def plot_document_length_analysis(df):
     return fig
 
 def plot_sentiment_score_distribution(df):
-    """감정 점수 분포 히스토그램"""
+    """센티먼트 분포"""
     fig = go.Figure()
     
     fig.add_trace(go.Histogram(
@@ -381,9 +381,9 @@ def plot_sentiment_score_distribution(df):
                   annotation_text=f"평균: {df['Sentiment_Score'].mean():.3f}")
     
     fig.update_layout(
-        title="감정 점수 분포",
-        xaxis_title="감정 점수",
-        yaxis_title="종목 수",
+        title="센티먼트 분포",
+        xaxis_title="센티먼트",
+        yaxis_title="종목수",
         template="plotly_white",
         height=400
     )
@@ -391,7 +391,7 @@ def plot_sentiment_score_distribution(df):
     return fig
 
 def plot_sentiment_comparison_radar(df):
-    """감정 점수 상세 분석 차트"""
+    """센티먼트 상세 분석 차트"""
     top10 = df.nlargest(10, 'Sentiment_Score')
     
     fig = go.Figure(data=[
@@ -402,7 +402,7 @@ def plot_sentiment_comparison_radar(df):
                 color=top10['Sentiment_Score'],
                 colorscale='RdYlGn',
                 showscale=True,
-                colorbar=dict(title="감정 점수")
+                colorbar=dict(title="센티먼트")
             ),
             text=top10['Sentiment_Score'].round(3),
             textposition='auto',
@@ -410,9 +410,9 @@ def plot_sentiment_comparison_radar(df):
     ])
     
     fig.update_layout(
-        title="상위 10개 종목 감정 점수 상세",
+        title="상위 10개 종목 센티먼트 상세",
         xaxis_title="종목",
-        yaxis_title="감정 점수",
+        yaxis_title="센티먼트",
         template="plotly_white",
         height=500
     )
@@ -434,7 +434,7 @@ def main():
         help="Document Title, Date, Equity, 0-6 열을 포함한 CSV 파일"
     )
     
-    analyze_button = st.sidebar.button("📈 감정 분석 실행", key="analyze_main")
+    analyze_button = st.sidebar.button("📈 센티먼트 분석 실행", key="analyze_main")
     
     if uploaded_file is not None:
         # 파일 로드
@@ -457,7 +457,7 @@ def main():
             
             st.info(f"✅ 모델: {model_name}")
             
-            with st.spinner("⏳ 감정 분석 진행 중..."):
+            with st.spinner("⏳ 센티먼트 분석 진행 중..."):
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 
@@ -559,7 +559,7 @@ def main():
             with col4:
                 top_equity = df.nlargest(1, 'Sentiment_Score').iloc[0]
                 st.metric(
-                    "최고 평가 종목",
+                    "최고 선호 종목",
                     top_equity['Equity'],
                     f"{top_equity['Sentiment_Score']:.3f}"
                 )
@@ -580,7 +580,7 @@ def main():
             st.subheader("📈 센티먼트 분석 상세")
             
             tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-                "감정 분포", "종목 점수", "상위 종목 비교", "워드클라우드", "문서 분석", "상세 분석"
+                "센티먼트 분포", "종목 점수", "상위 종목 비교", "워드클라우드", "문서 분석", "상세 분석"
             ])
             
             with tab1:
@@ -593,11 +593,11 @@ def main():
                 
                 # 감정 분류 기준 설명 추가
                 st.info("""
-                **📌 감정 분류 기준 안내**
+                **📌 센티먼트 분류 기준 **
                 
-                - **긍정 (POSITIVE)**: 감정 점수 > 0.2
-                - **중립 (NEUTRAL)**: -0.2 ≤ 감정 점수 ≤ 0.2  
-                - **부정 (NEGATIVE)**: 감정 점수 < -0.2
+                - **긍정 (POSITIVE)**: 센티먼트 > 0.2
+                - **중립 (NEUTRAL)**: -0.2 ≤ 센티먼트 ≤ 0.2  
+                - **부정 (NEGATIVE)**: 센티먼트 < -0.2
                 
                 **💡 부정적 종목이 적은 이유:**
                 Earnings call 및 재무 보고서는 일반적으로 중립적이거나 긍정적인 언어를 사용하는 경향이 있습니다. 
@@ -675,7 +675,7 @@ def main():
                 display_ranking = equity_ranking[['Sentiment_Score', 'Sentiment', 
                                                   'Document_Count', 'Sentiment_Grade', 
                                                   'Investment_Preference']].copy()
-                display_ranking.columns = ['감정점수', '감정분류', '문서수', '등급', '투자선호도']
+                display_ranking.columns = ['센티먼트', '센티먼트 분류', '문서수', '등급', '투자선호도']
                 display_ranking = display_ranking.round(4)
                 
                 st.dataframe(
@@ -733,49 +733,7 @@ def main():
                     label="📥 분석 결과 (CSV)",
                     data=result_csv,
                     file_name=f"sentiment_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv"
-                )
-            
-            with col2:
-                # 종목 순위 다운로드
-                equity_ranking = calculate_equity_ranking(df)
-                ranking_csv = equity_ranking.to_csv()
-                st.download_button(
-                    label="📊 종목 순위 (CSV)",
-                    data=ranking_csv,
-                    file_name=f"equity_ranking_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv"
-                )
-    
-    else:
-        st.info("👈 왼쪽 사이드바에서 CSV 파일을 업로드하세요.")
-        
-        st.markdown("---")
-        st.subheader("📝 사용 방법")
-        st.markdown("""
-        1. **파일 업로드**: CSV 파일을 업로드합니다
-           - 필수 열: Document Title, Date, Equity
-           - 텍스트 열: 0, 1, 2, 3, 4, 5, 6 (자동으로 통합됩니다)
-        
-        2. **분석 실행**: "감정 분석 실행" 버튼을 클릭합니다
-           - 최신 Transformer 모델 (FinBERT) 사용
-           - 금융 도메인에 최적화된 감정 분석
-        
-        3. **결과 확인**: 
-           - 📊 감정 분포 및 시각화
-           - 🏆 종목별 순위 및 포트폴리오 점수
-           - 🔍 주요 키워드 분석
-           - 💭 감정별 상세 통계
-        
-        4. **결과 다운로드**: 분석 결과를 CSV로 저장합니다
-        """)
-        
-        st.markdown("---")
-        st.subheader("🤖 사용 모델")
-        st.markdown("""
-        - **FinBERT**: BERT를 금융 텍스트로 파인튜닝한 최신 모델
-        - **Transformer Pipeline**: 고성능 감정 분석
-        - **Word Cloud**: 감정별/종목별 주요 단어 시각화
+                    mi트별/종목별 주요 단어 시각화
         
         이 모델들은 전통적 방식보다 훨씬 높은 정확도를 제공합니다.
         """)
