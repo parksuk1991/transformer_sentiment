@@ -24,7 +24,7 @@ os.environ['REQUESTS_CA_BUNDLE'] = ''
 
 # 페이지 구성 설정
 st.set_page_config(
-    page_title="포트폴리오 감정 분석 시스템",
+    page_title="Sentiment Analysis",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
