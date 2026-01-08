@@ -115,7 +115,23 @@ def chunk_text(text, max_length=512):
     return chunks if chunks else [text[:max_length]]
 
 def analyze_sentiment_for_equity(text, sentiment_pipeline):
-    """종목별 전체 텍스트에 대한 감정 분석"""
+    """
+    종목별 전체 텍스트에 대한 감정 분석
+    
+    점수 계산 방식:
+    1. 텍스트를 512토큰 단위로 청킹
+    2. 각 청크별로 FinBERT 모델이 POSITIVE/NEGATIVE/NEUTRAL 분류 + 신뢰도 점수(0~1) 반환
+    3. 최종 점수 = (긍정 청크 비율 × 평균 긍정 신뢰도) - (부정 청크 비율 × 평균 부정 신뢰도)
+    4. 범위: -1(완전 부정) ~ +1(완전 긍정)
+    
+    분류 기준:
+    - POSITIVE: 점수 > 0.2 (긍정 기준선)
+    - NEGATIVE: 점수 < -0.2 (부정 기준선)
+    - NEUTRAL: -0.2 ≤ 점수 ≤ 0.2
+    
+    참고: 실제 earnings call 텍스트는 대부분 중립적이거나 약간 긍정적인 경향이 있어
+          부정적 점수가 드물게 나타날 수 있습니다.
+    """
     if not text or len(text.strip()) == 0:
         return "NEUTRAL", 0.0
     
@@ -139,16 +155,17 @@ def analyze_sentiment_for_equity(text, sentiment_pipeline):
     neutral_scores = [r['score'] for r in chunk_results if r['label'] in ['NEUTRAL', 'neutral']]
     
     # 최종 점수 계산 (-1 ~ 1 범위)
+    # 긍정/부정 청크의 평균 신뢰도와 비율을 모두 고려
     avg_positive = np.mean(positive_scores) if positive_scores else 0
     avg_negative = np.mean(negative_scores) if negative_scores else 0
-    avg_neutral = np.mean(neutral_scores) if neutral_scores else 0
     
     positive_weight = len(positive_scores) / len(chunk_results)
     negative_weight = len(negative_scores) / len(chunk_results)
     
+    # 최종 점수: 긍정 기여도 - 부정 기여도
     final_score = (avg_positive * positive_weight) - (avg_negative * negative_weight)
     
-    # 감정 분류 (더 엄격한 기준)
+    # 감정 분류 (엄격한 기준)
     if final_score > 0.2:
         sentiment = "POSITIVE"
     elif final_score < -0.2:
@@ -249,12 +266,12 @@ def plot_equity_sentiment_scores(df):
     
     fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
     fig.add_hline(y=0.2, line_dash="dot", line_color="green", opacity=0.3, 
-                  annotation_text="긍정 기준선")
+                  annotation_text="긍정 기준선 (0.2)")
     fig.add_hline(y=-0.2, line_dash="dot", line_color="red", opacity=0.3,
-                  annotation_text="부정 기준선")
+                  annotation_text="부정 기준선 (-0.2)")
     
     fig.update_layout(
-        title="종목별 감정 점수 (높을수록 긍정적)",
+        title="종목별 감정 점수 (높을수록 긍정적)<br><sub>긍정 기준: >0.2 | 부정 기준: <-0.2 | 중립: -0.2~0.2</sub>",
         xaxis_title="종목",
         yaxis_title="감정 점수",
         template="plotly_white",
@@ -288,11 +305,17 @@ def plot_wordcloud(text, title="워드클라우드"):
 
 def plot_top_equities_comparison(df, top_n=10):
     """상위 종목 비교 차트"""
-    df_top = df.nlargest(top_n, 'Sentiment_Score')
+    # Investment_Preference 컬럼 추가
+    df_with_pref = df.copy()
+    df_with_pref['Investment_Preference'] = df_with_pref['Sentiment_Score'].apply(
+        lambda x: '강력 추천' if x > 0.4 else ('추천' if x > 0.2 else ('중립' if x > -0.2 else '회피'))
+    )
+    
+    df_top = df_with_pref.nlargest(top_n, 'Sentiment_Score')
     
     fig = make_subplots(
         rows=1, cols=2,
-        subplot_titles=("감정 점수 Top 10", "투자 선호도"),
+        subplot_titles=("감정 점수 Top 10", "투자 선호도 분포"),
         specs=[[{"type": "bar"}, {"type": "pie"}]]
     )
     
@@ -310,7 +333,7 @@ def plot_top_equities_comparison(df, top_n=10):
     )
     
     # 파이 차트
-    preference_counts = df['Investment_Preference'].value_counts()
+    preference_counts = df_with_pref['Investment_Preference'].value_counts()
     fig.add_trace(
         go.Pie(
             labels=preference_counts.index,
@@ -368,30 +391,29 @@ def plot_sentiment_score_distribution(df):
     return fig
 
 def plot_sentiment_comparison_radar(df):
-    """감정 비교 레이더 차트 (Top 5)"""
-    top5 = df.nlargest(5, 'Sentiment_Score')
+    """감정 점수 상세 분석 차트"""
+    top10 = df.nlargest(10, 'Sentiment_Score')
     
-    categories = ['감정점수', '문서수', '긍정도']
-    
-    fig = go.Figure()
-    
-    for _, row in top5.iterrows():
-        # 정규화된 값
-        sentiment_norm = (row['Sentiment_Score'] + 1) / 2  # -1~1을 0~1로
-        doc_norm = min(row['Document_Count'] / 10, 1)  # 10개 기준
-        positive_norm = 1 if row['Sentiment'] == 'POSITIVE' else (0.5 if row['Sentiment'] == 'NEUTRAL' else 0)
-        
-        fig.add_trace(go.Scatterpolar(
-            r=[sentiment_norm, doc_norm, positive_norm],
-            theta=categories,
-            fill='toself',
-            name=row['Equity']
-        ))
+    fig = go.Figure(data=[
+        go.Bar(
+            x=top10['Equity'],
+            y=top10['Sentiment_Score'],
+            marker=dict(
+                color=top10['Sentiment_Score'],
+                colorscale='RdYlGn',
+                showscale=True,
+                colorbar=dict(title="감정 점수")
+            ),
+            text=top10['Sentiment_Score'].round(3),
+            textposition='auto',
+        )
+    ])
     
     fig.update_layout(
-        polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
-        showlegend=True,
-        title="Top 5 종목 비교 (레이더 차트)",
+        title="상위 10개 종목 감정 점수 상세",
+        xaxis_title="종목",
+        yaxis_title="감정 점수",
+        template="plotly_white",
         height=500
     )
     
@@ -562,15 +584,28 @@ def main():
             ])
             
             with tab1:
-                st.plotly_chart(plot_sentiment_distribution(df), use_container_width=True)
-                st.plotly_chart(plot_sentiment_score_distribution(df), use_container_width=True)
+                st.plotly_chart(plot_sentiment_distribution(df), width="stretch")
+                st.plotly_chart(plot_sentiment_score_distribution(df), width="stretch")
             
             with tab2:
-                st.plotly_chart(plot_equity_sentiment_scores(df), use_container_width=True)
-                st.plotly_chart(plot_sentiment_comparison_radar(df), use_container_width=True)
+                st.plotly_chart(plot_equity_sentiment_scores(df), width="stretch")
+                st.plotly_chart(plot_sentiment_comparison_radar(df), width="stretch")
+                
+                # 감정 분류 기준 설명 추가
+                st.info("""
+                **📌 감정 분류 기준 안내**
+                
+                - **긍정 (POSITIVE)**: 감정 점수 > 0.2
+                - **중립 (NEUTRAL)**: -0.2 ≤ 감정 점수 ≤ 0.2  
+                - **부정 (NEGATIVE)**: 감정 점수 < -0.2
+                
+                **💡 부정적 종목이 적은 이유:**
+                Earnings call 및 재무 보고서는 일반적으로 중립적이거나 긍정적인 언어를 사용하는 경향이 있습니다. 
+                실제로 부정적인 내용도 완곡하게 표현되는 경우가 많아, 명확히 부정적인 점수(-0.2 이하)를 받는 경우는 드뭅니다.
+                """)
             
             with tab3:
-                st.plotly_chart(plot_top_equities_comparison(df), use_container_width=True)
+                st.plotly_chart(plot_top_equities_comparison(df), width="stretch")
             
             with tab4:
                 st.markdown("### 워드클라우드 분석")
@@ -616,7 +651,7 @@ def main():
                         st.warning("워드클라우드를 생성할 텍스트가 없습니다.")
             
             with tab5:
-                st.plotly_chart(plot_document_length_analysis(df), use_container_width=True)
+                st.plotly_chart(plot_document_length_analysis(df), width="stretch")
                 
                 # 통계 요약
                 st.markdown("### 📊 문서 통계")
@@ -670,7 +705,7 @@ def main():
                         color_continuous_scale='Viridis'
                     )
                     fig.update_layout(height=500)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
                 else:
                     st.info("추출할 키워드가 없습니다.")
                 
