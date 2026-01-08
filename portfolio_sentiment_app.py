@@ -719,7 +719,8 @@ def main():
                 
                 sentiment_stats.columns = ['종목수', '평균점수', '표준편차', '최소', '최대']
                 st.dataframe(sentiment_stats, use_container_width=True)
-            
+
+
             # ==================== 다운로드 섹션 ====================
             st.markdown("---")
             st.subheader("💾 결과 다운로드")
@@ -733,7 +734,49 @@ def main():
                     label="📥 분석 결과 (CSV)",
                     data=result_csv,
                     file_name=f"sentiment_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mi트별/종목별 주요 단어 시각화
+                    mime="text/csv"
+                )
+            
+            with col2:
+                # 종목 순위 다운로드
+                equity_ranking = calculate_equity_ranking(df)
+                ranking_csv = equity_ranking.to_csv()
+                st.download_button(
+                    label="📊 종목 순위 (CSV)",
+                    data=ranking_csv,
+                    file_name=f"equity_ranking_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv"
+                )
+    
+    else:
+        st.info("👈 왼쪽 사이드바에서 CSV 파일을 업로드하세요.")
+        
+        st.markdown("---")
+        st.subheader("📝 사용 방법")
+        st.markdown("""
+        1. **파일 업로드**: CSV 파일을 업로드합니다
+           - 필수 열: Document Title, Date, Equity
+           - 텍스트 열: 0, 1, 2, 3, 4, 5, 6 (자동으로 통합됩니다)
+        
+        2. **분석 실행**: "센티먼트 분석 실행" 버튼을 클릭합니다
+           - 최신 Transformer 모델 (FinBERT) 사용
+           - 금융 도메인에 최적화된 센티먼트 분석
+        
+        3. **결과 확인**: 
+           - 📊 센티먼트 분포 및 시각화
+           - 🏆 종목별 순위 및 포트폴리오 점수
+           - 🔍 주요 키워드 분석
+           - 💭 센티먼트별 상세 통계
+        
+        4. **결과 다운로드**: 분석 결과를 CSV로 저장합니다
+        """)
+        
+        st.markdown("---")
+        st.subheader("🤖 사용 모델")
+        st.markdown("""
+        - **FinBERT**: BERT를 금융 텍스트로 파인튜닝한 최신 모델
+        - **Transformer Pipeline**: 고성능 감정 분석
+        - **Word Cloud**: 센티먼트별/종목별 주요 단어 시각화
         
         이 모델들은 전통적 방식보다 훨씬 높은 정확도를 제공합니다.
         """)
