@@ -829,7 +829,7 @@ def main():
                         equity_data = df[df['Equity'] == equity_filter].iloc[0]
                         text_data = equity_data['Combined_Text']
                         sentiment = equity_data['Sentiment']
-                        title = f"{equity_filter} - {sentiment} 기여 단어"
+                        title = f"{equity_filter} - {sentiment} (Contribution Based)"
             
                         with st.spinner("분석 중..."):
                             wordcloud_fig = plot_sentiment_wordcloud(
