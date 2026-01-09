@@ -48,7 +48,7 @@ st.markdown("""
         font-weight: bold;
     }
     .neutral {
-        color: #6c757d;
+        color: #ffc107; 
         font-weight: bold;
     }
     .top-equity {
