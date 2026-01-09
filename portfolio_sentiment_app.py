@@ -918,7 +918,7 @@ def main():
                 
                 display_ranking = equity_ranking[['Equity', 'Sentiment_Score', 'Sentiment', 
                                                   'Document_Count']].copy()
-                display_ranking.columns = ['종목', '확신ㄷ노', '센티먼트 분류', '문서수']
+                display_ranking.columns = ['종목', '확신도', '센티먼트 분류', '문서수']
                 display_ranking = display_ranking.round(4)
                 
                 st.dataframe(
