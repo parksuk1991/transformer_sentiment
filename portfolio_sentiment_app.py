@@ -694,17 +694,28 @@ def main():
                     f"{sentiment_counts.get('NEUTRAL', 0)}개",
                     f"{sentiment_counts.get('NEUTRAL', 0) / len(df) * 100:.1f}%"
                 )
-            
+
             with col4:
-                top_equity = df.nlargest(1, 'Sentiment_Score').iloc[0]
-                st.metric(
-                    "최고 선호 종목",
-                    top_equity['Equity'],
-                    f"{top_equity['Sentiment_Score']:.3f}"
-                )
-            
+                # POSITIVE 종목 중 확신도가 가장 높은 종목
+                positive_equities = df[df['Sentiment'] == 'POSITIVE']
+                if len(positive_equities) > 0:
+                    top_equity = positive_equities.nlargest(1, 'Sentiment_Score').iloc[0]
+                    st.metric(
+                        "최고 선호 종목",
+                        top_equity['Equity'],
+                        f"{top_equity['Sentiment_Score']:.3f}"
+                    )
+                else:
+                    st.metric(
+                        "최고 선호 종목",
+                        "없음",
+                        "긍정 종목 없음"
+                    )
+
+
             # Top 5 종목 표시
             st.markdown("### 🏆 센티먼트 Top 5")
+            st.caption("AI가 센티먼트 분류를 가장 확신하는 종목 순위")
             top5 = df.nlargest(5, 'Sentiment_Score')[['Equity', 'Sentiment_Score', 'Sentiment']]
             
             cols = st.columns(5)
@@ -719,14 +730,10 @@ def main():
             st.subheader("📈 센티먼트 분석 상세")
             
             tab1, tab2, tab3, tab4, tab5 = st.tabs([
-                "센티먼트 분포", "종목 점수", "워드클라우드", "문서 분석", "상세 분석"
+                "종목별 점수", "센티먼트 분포", "워드클라우드", "문서 분석", "상세 분석"
             ])
             
             with tab1:
-                st.plotly_chart(plot_sentiment_distribution(df), width="stretch")
-                st.plotly_chart(plot_sentiment_score_distribution(df), width="stretch")
-            
-            with tab2:
                 st.plotly_chart(plot_equity_sentiment_scores(df), width="stretch")
                 st.plotly_chart(plot_sentiment_comparison_radar(df), width="stretch")
                 
@@ -780,8 +787,12 @@ def main():
                         - 센티먼트: NEUTRAL (중립)
                         - 확신도: {row['Sentiment_Score']:.3f}
                         - 해석: AI가 이 종목의 문서에서 긍정도 부정도 아닌 중립적인 내용을 {row['Sentiment_Score']*100:.1f}% 확신으로 판단했습니다.
-                        """)                
+                        """)     
             
+            with tab2:
+                st.plotly_chart(plot_sentiment_distribution(df), width="stretch")
+                st.plotly_chart(plot_sentiment_score_distribution(df), width="stretch")
+                        
             with tab3:
                 sentiment_pipeline = st.session_state.get('sentiment_pipeline')  # 이 줄 추가
                 st.markdown("### 워드클라우드 분석")
