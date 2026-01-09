@@ -273,13 +273,16 @@ def plot_equity_sentiment_scores(df):
         'NEUTRAL': '#6c757d'
     })
     
+    # 텍스트 레이블 생성 (수정된 부분)
+    text_labels = [f"{score:.3f}<br>({sent})" 
+                   for score, sent in zip(df_sorted['Sentiment_Score'], df_sorted['Sentiment'])]
+    
     fig = go.Figure(data=[
         go.Bar(
             x=df_sorted['Equity'],
             y=df_sorted['Sentiment_Score'],
             marker=dict(color=colors),
-            text=[f"{s}<br>({row['Sentiment']})" 
-                  for s, row in zip(df_sorted['Sentiment_Score'].round(3), df_sorted.iterrows())],
+            text=text_labels,
             textposition='auto',
             hovertext=hover_text,
             hoverinfo='text',
@@ -309,7 +312,6 @@ def plot_equity_sentiment_scores(df):
     )
     
     return fig
-
 
 def extract_sentiment_contributing_words(text, sentiment_pipeline, target_sentiment, top_n=100):
     """
