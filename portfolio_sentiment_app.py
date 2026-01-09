@@ -714,7 +714,7 @@ def main():
 
 
             # Top 5 종목 표시
-            st.markdown("### 🏆 센티먼트 Top 5")
+            st.markdown("### 🏆 센티먼트 확신도 Top 5")
             st.caption("AI가 센티먼트 분류를 가장 확신하는 종목 순위")
             top5 = df.nlargest(5, 'Sentiment_Score')[['Equity', 'Sentiment_Score', 'Sentiment']]
             
