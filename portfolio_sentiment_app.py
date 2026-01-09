@@ -206,12 +206,12 @@ def calculate_equity_ranking(equity_df):
     equity_df['Portfolio_Score'] = equity_df['Sentiment_Score']
     
     equity_df['Sentiment_Grade'] = equity_df['Sentiment_Score'].apply(
-        lambda x: 'A+' if x > 0.6 else ('A' if x > 0.4 else ('B+' if x > 0.2 else 
+        lambda x: 'S' if x > 0.6 else ('A+' if x > 0.4 else ('A' if x > 0.2 else 
                   ('B' if x > 0 else ('C' if x > -0.2 else ('D' if x > -0.4 else 'F')))))
     )
     
     equity_df['Investment_Preference'] = equity_df['Sentiment_Score'].apply(
-        lambda x: '강력 추천' if x > 0.4 else ('추천' if x > 0.2 else ('중립' if x > -0.2 else '회피')))
+        lambda x: 'Positive' if x > 0.4 else ('Decent' if x > 0.2 else ('Neutral' if x > -0.2 else 'Negaative')))
     
     return equity_df.sort_values('Portfolio_Score', ascending=False)
 
