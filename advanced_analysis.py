@@ -1,5 +1,5 @@
 # Advanced Portfolio Analysis Module
-# 포트폴리오 고급 분석 모듈
+# 포트폴리오 분석 모듈
 # 시계열 분석, 감정 변화 추적, 리스크 분석 등
 
 import pandas as pd
@@ -329,7 +329,7 @@ class AdvancedPortfolioAnalyzer:
         return report
 
 
-# ==================== 사용 예제 ====================
+# ==================== 실행  ====================
 
 if __name__ == "__main__":
     """
