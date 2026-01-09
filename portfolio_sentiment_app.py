@@ -201,24 +201,6 @@ def calculate_equity_ranking(equity_df):
     equity_df = equity_df.copy()
     equity_df['Portfolio_Score'] = equity_df['Sentiment_Score']
     
-    # 점수 범위가 0~1이므로 등급 기준 변경
-    equity_df['Sentiment_Grade'] = equity_df['Sentiment_Score'].apply(
-        lambda x: 'S' if x > 0.8 else (
-                  'A+' if x > 0.7 else (
-                  'A' if x > 0.6 else (
-                  'B' if x > 0.5 else (
-                  'C' if x > 0.4 else (
-                  'D' if x > 0.3 else 'F')))))
-    )
-    
-    # 투자 선호도도 0~1 범위에 맞게 조정
-    equity_df['Investment_Preference'] = equity_df['Sentiment_Score'].apply(
-        lambda x: 'Strong Buy' if x > 0.7 else (
-                  'Buy' if x > 0.6 else (
-                  'Hold' if x > 0.5 else (
-                  'Caution' if x > 0.4 else 'Avoid')))
-    )
-    
     return equity_df.sort_values('Portfolio_Score', ascending=False)
 
 # ======================== 시각화 함수 ========================
@@ -230,14 +212,14 @@ def plot_sentiment_distribution(df):
     colors = {
         'POSITIVE': '#28a745',
         'NEGATIVE': '#dc3545',
-        'NEUTRAL': '#6c757d'
+        'NEUTRAL': '#ffc107'
     }
     
     fig = go.Figure(data=[
         go.Bar(
             x=sentiment_counts.index,
             y=sentiment_counts.values,
-            marker=dict(color=[colors.get(x, '#6c757d') for x in sentiment_counts.index]),
+            marker=dict(color=[colors.get(x, '#ffc107') for x in sentiment_counts.index]),
             text=sentiment_counts.values,
             textposition='auto',
         )
@@ -270,7 +252,7 @@ def plot_equity_sentiment_scores(df):
     colors = df_sorted['Sentiment'].map({
         'POSITIVE': '#28a745',
         'NEGATIVE': '#dc3545',
-        'NEUTRAL': '#6c757d'
+        'NEUTRAL': '#ffc107'
     })
     
     # 텍스트 레이블 생성 (수정된 부분)
@@ -301,7 +283,7 @@ def plot_equity_sentiment_scores(df):
     
     # 범례 역할을 하는 주석 추가
     fig.add_annotation(
-        text="<b>색상 설명:</b><br>🟢 긍정(POSITIVE) | ⚫ 중립(NEUTRAL) | 🔴 부정(NEGATIVE)",
+        text="<b>색상 설명:</b><br>🟢 긍정(POSITIVE) | 🟡 중립(NEUTRAL) | 🔴 부정(NEGATIVE)",
         xref="paper", yref="paper",
         x=0.5, y=1.15,
         showarrow=False,
@@ -471,7 +453,7 @@ def plot_document_length_analysis(df):
         hover_data=['Equity'],
         title="문서 길이 vs 센티먼트",
         labels={'Text_Length': '문서 길이 (문자 수)', 'Sentiment_Score': '센티먼트'},
-        color_discrete_map={'POSITIVE': '#28a745', 'NEGATIVE': '#dc3545', 'NEUTRAL': '#6c757d'}
+        color_discrete_map={'POSITIVE': '#28a745', 'NEGATIVE': '#dc3545', 'NEUTRAL': '#ffc107'}
     )
     
     fig.update_layout(height=400, template="plotly_white")
@@ -482,7 +464,7 @@ def plot_sentiment_score_distribution(df):
     fig = go.Figure()
     
     # 센티먼트별로 히스토그램 생성
-    for sentiment, color in [('POSITIVE', '#28a745'), ('NEGATIVE', '#dc3545'), ('NEUTRAL', '#6c757d')]:
+    for sentiment, color in [('POSITIVE', '#28a745'), ('NEGATIVE', '#dc3545'), ('NEUTRAL', '#ffc107')]:
         sentiment_data = df[df['Sentiment'] == sentiment]['Sentiment_Score']
         if len(sentiment_data) > 0:
             fig.add_trace(go.Histogram(
@@ -517,7 +499,7 @@ def plot_sentiment_comparison_radar(df):
     colors = top10['Sentiment'].map({
         'POSITIVE': '#28a745',
         'NEGATIVE': '#dc3545',
-        'NEUTRAL': '#6c757d'
+        'NEUTRAL': '#ffc107'
     })
     
     fig = go.Figure(data=[
@@ -719,7 +701,7 @@ def main():
 
                 **색상 = AI가 분류한 센티먼트**
                 - 🟢 **초록색**: AI가 "긍정(POSITIVE)"으로 판단한 종목
-                - ⚫ **회색**: AI가 "중립(NEUTRAL)"로 판단한 종목  
+                - 🟡 **노란색**: AI가 "중립(NEUTRAL)"로 판단한 종목  
                 - 🔴 **빨간색**: AI가 "부정(NEGATIVE)"로 판단한 종목
 
                 **점수 의미 (0~1 범위)**:
@@ -891,19 +873,17 @@ def main():
                 # 종목별 순위
                 equity_ranking = calculate_equity_ranking(df)
                 
-                st.markdown("#### 🏆 종목 순위 및 포트폴리오 평가")
+                st.markdown("#### 🏆 종목 순위 및 포트폴리오 분")
                 st.caption("""
                 💡 **테이블 설명**: 
                 - 센티먼트 열 = AI의 확신도 (높을수록 해당 분류에 확신)
                 - 센티먼트 분류 = AI가 판단한 긍정/중립/부정
-                - 등급 = 확신도 기반 자동 등급 (참고용)
-                - 투자선호도 = 확신도와 센티먼트 조합 (참고용)
+                - 문서수 = 해당 종목에 대한 분석 문서 개수
                 """)
                 
                 display_ranking = equity_ranking[['Equity', 'Sentiment_Score', 'Sentiment', 
-                                                  'Document_Count', 'Sentiment_Grade', 
-                                                  'Investment_Preference']].copy()
-                display_ranking.columns = ['종목', '센티먼트', '센티먼트 분류', '문서수', '등급', '투자선호도']
+                                                  'Document_Count']].copy()
+                display_ranking.columns = ['종목', '확신ㄷ노', '센티먼트 분류', '문서수']
                 display_ranking = display_ranking.round(4)
                 
                 st.dataframe(
