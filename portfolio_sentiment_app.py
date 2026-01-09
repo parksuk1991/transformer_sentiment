@@ -746,11 +746,10 @@ def main():
                         - 확신도: {row['Sentiment_Score']:.3f}
                         - 해석: AI가 이 종목의 문서에서 긍정도 부정도 아닌 중립적인 내용을 {row['Sentiment_Score']*100:.1f}% 확신으로 판단했습니다.
                         """)                
-            
             with tab3:
-                sentiment_pipeline = st.session_state.get('sentiment_pipeline')  # 이 줄 추가
+                sentiment_pipeline = st.session_state.get('sentiment_pipeline')
                 st.markdown("### 워드클라우드 분석")
-    
+
                 # 분석 모드 선택
                 analysis_mode = st.radio(
                     "분석 모드 선택",
@@ -758,100 +757,134 @@ def main():
                     horizontal=True,
                     help="기여도 기반: 실제로 센티먼트 분류에 영향을 준 단어만 표시 (처리 시간 더 소요)"
                 )
-    
+
                 wc_option = st.radio(
                     "워드클라우드 유형 선택",
                     options=["센티먼트별", "종목별"],
                     horizontal=True
                 )
-    
+
                 if analysis_mode == "빈도 기반 (기본)":
-                    # 기존 코드 유지
                     if wc_option == "센티먼트별":
+                        # 실제 존재하는 센티먼트만 선택지로 제공
+                        available_sentiments = df['Sentiment'].unique().tolist()
+                        sentiment_options = ["전체"] + available_sentiments
+            
                         sentiment_filter = st.selectbox(
                             "센티먼트 선택",
-                            options=["전체"] + df['Sentiment'].unique().tolist()
+                            options=sentiment_options
                         )
-            
+    
                         if sentiment_filter == "전체":
                             text_data = ' '.join(df['Combined_Text'].tolist())
                             title = "All Word Cloud"
                         else:
-                            text_data = ' '.join(df[df['Sentiment'] == sentiment_filter]['Combined_Text'].tolist())
-                            title = f"{sentiment_filter} Word Cloud"
-            
-                        wordcloud_fig = plot_wordcloud(text_data, title)
-                        if wordcloud_fig:
-                            st.pyplot(wordcloud_fig, use_container_width=True)
+                            filtered_df = df[df['Sentiment'] == sentiment_filter]
+                            if len(filtered_df) == 0:
+                                st.warning(f"{sentiment_filter} 센티먼트에 해당하는 종목이 없습니다.")
+                                text_data = None
+                            else:
+                                text_data = ' '.join(filtered_df['Combined_Text'].tolist())
+                                title = f"{sentiment_filter} Word Cloud"
+    
+                        if text_data and len(text_data.strip()) > 0:
+                            wordcloud_fig = plot_wordcloud(text_data, title)
+                            if wordcloud_fig:
+                                st.pyplot(wordcloud_fig, use_container_width=True)
+                            else:
+                                st.warning("워드클라우드를 생성할 텍스트가 없습니다.")
                         else:
-                            st.warning("워드클라우드를 생성할 텍스트가 없습니다.")
-        
+                            st.warning("분석할 텍스트가 없습니다.")
+
                     else:  # 종목별
                         equity_filter = st.selectbox(
                             "종목 선택",
                             options=df['Equity'].tolist()
                         )
-            
-                        text_data = df[df['Equity'] == equity_filter]['Combined_Text'].iloc[0]
-                        title = f"{equity_filter} Word Cloud"
-            
-                        wordcloud_fig = plot_wordcloud(text_data, title)
-                        if wordcloud_fig:
-                            st.pyplot(wordcloud_fig, use_container_width=True)
-                        else:
-                            st.warning("워드클라우드를 생성할 텍스트가 없습니다.")
     
+                        equity_data = df[df['Equity'] == equity_filter]
+                        if len(equity_data) > 0:
+                            text_data = equity_data['Combined_Text'].iloc[0]
+                            title = f"{equity_filter} Word Cloud"
+    
+                            if text_data and len(text_data.strip()) > 0:
+                                wordcloud_fig = plot_wordcloud(text_data, title)
+                                if wordcloud_fig:
+                                    st.pyplot(wordcloud_fig, use_container_width=True)
+                                else:
+                                    st.warning("워드클라우드를 생성할 텍스트가 없습니다.")
+                            else:
+                                st.warning(f"{equity_filter}의 텍스트 데이터가 없습니다.")
+                        else:
+                            st.warning(f"{equity_filter} 종목을 찾을 수 없습니다.")
+
                 else:  # 센티먼트 기여도 기반
-        
                     if wc_option == "센티먼트별":
+                        available_sentiments = df['Sentiment'].unique().tolist()
+            
                         sentiment_filter = st.selectbox(
                             "센티먼트 선택",
-                            options=df['Sentiment'].unique().tolist(),
+                            options=available_sentiments,
                             key="sentiment_contrib"
                         )
-            
-                        text_data = ' '.join(df[df['Sentiment'] == sentiment_filter]['Combined_Text'].tolist())
-                        title = f"{sentiment_filter} - 센티먼트 기여 단어"
-            
-                        with st.spinner("분석 중..."):
-                            wordcloud_fig = plot_sentiment_wordcloud(
-                                text_data, 
-                                sentiment_filter, 
-                                sentiment_pipeline,
-                                title
-                            )
-            
-                        if wordcloud_fig:
-                            st.pyplot(wordcloud_fig, use_container_width=True)
-                            st.caption("💡 단어 크기 = 해당 센티먼트 분류에 대한 AI 모델의 기여도")
+    
+                        filtered_df = df[df['Sentiment'] == sentiment_filter]
+                        if len(filtered_df) == 0:
+                            st.warning(f"{sentiment_filter} 센티먼트에 해당하는 종목이 없습니다.")
                         else:
-                            st.warning("분석할 텍스트가 없습니다.")
-        
+                            text_data = ' '.join(filtered_df['Combined_Text'].tolist())
+                            title = f"{sentiment_filter} - 센티먼트 기여 단어"
+    
+                            if text_data and len(text_data.strip()) > 0:
+                                with st.spinner("분석 중..."):
+                                    wordcloud_fig = plot_sentiment_wordcloud(
+                                        text_data, 
+                                        sentiment_filter, 
+                                        sentiment_pipeline,
+                                        title
+                                    )
+    
+                                if wordcloud_fig:
+                                    st.pyplot(wordcloud_fig, use_container_width=True)
+                                    st.caption("💡 단어 크기 = 해당 센티먼트 분류에 대한 AI 모델의 기여도")
+                                else:
+                                    st.warning("분석할 텍스트가 없습니다.")
+                            else:
+                                st.warning("분석할 텍스트가 없습니다.")
+
                     else:  # 종목별
                         equity_filter = st.selectbox(
                             "종목 선택",
                             options=df['Equity'].tolist(),
                             key="equity_contrib"
                         )
-            
-                        equity_data = df[df['Equity'] == equity_filter].iloc[0]
-                        text_data = equity_data['Combined_Text']
-                        sentiment = equity_data['Sentiment']
-                        title = f"{equity_filter} - {sentiment} (Contribution Based)"
-            
-                        with st.spinner("분석 중..."):
-                            wordcloud_fig = plot_sentiment_wordcloud(
-                                text_data,
-                                sentiment,
-                                sentiment_pipeline,
-                                title
-                            )
-            
-                        if wordcloud_fig:
-                            st.pyplot(wordcloud_fig, use_container_width=True)
-                            st.caption("💡 이 종목이 해당 센티먼트로 분류된 이유가 되는 핵심 단어들입니다.")
+    
+                        equity_data = df[df['Equity'] == equity_filter]
+                        if len(equity_data) > 0:
+                            row = equity_data.iloc[0]
+                            text_data = row['Combined_Text']
+                            sentiment = row['Sentiment']
+                            title = f"{equity_filter} - {sentiment} (Contribution Based)"
+    
+                            if text_data and len(text_data.strip()) > 0:
+                                with st.spinner("분석 중..."):
+                                    wordcloud_fig = plot_sentiment_wordcloud(
+                                        text_data,
+                                        sentiment,
+                                        sentiment_pipeline,
+                                        title
+                                    )
+    
+                                if wordcloud_fig:
+                                    st.pyplot(wordcloud_fig, use_container_width=True)
+                                    st.caption("💡 이 종목이 해당 센티먼트로 분류된 이유가 되는 핵심 단어들입니다.")
+                                else:
+                                    st.warning("분석할 텍스트가 없습니다.")
+                            else:
+                                st.warning(f"{equity_filter}의 텍스트 데이터가 없습니다.")
                         else:
-                            st.warning("분석할 텍스트가 없습니다.")
+                            st.warning(f"{equity_filter} 종목을 찾을 수 없습니다.")
+
             
             with tab4:
                 st.plotly_chart(plot_document_length_analysis(df), width="stretch")
