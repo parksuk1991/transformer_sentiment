@@ -432,7 +432,50 @@ def plot_wordcloud(text, title="워드클라우드"):
     ax.set_title(title, fontsize=16, fontweight='bold')
     
     return fig
+
+def plot_top_equities_comparison(df, top_n=10):
+    """상위 종목 비교 차트"""
+    # Investment_Preference 컬럼 추가
+    df_with_pref = df.copy()
+    df_with_pref['Investment_Preference'] = df_with_pref['Sentiment_Score'].apply(
+        lambda x: '강력 추천' if x > 0.4 else ('추천' if x > 0.2 else ('중립' if x > -0.2 else '회피'))
+    )
     
+    df_top = df_with_pref.nlargest(top_n, 'Sentiment_Score')
+    
+    fig = make_subplots(
+        rows=1, cols=2,
+        subplot_titles=("센티먼트 Top 10", "투자 선호도 분포"),
+        specs=[[{"type": "bar"}, {"type": "pie"}]]
+    )
+    
+    # 막대 차트
+    fig.add_trace(
+        go.Bar(
+            x=df_top['Equity'],
+            y=df_top['Sentiment_Score'],
+            marker_color='lightblue',
+            text=df_top['Sentiment_Score'].round(3),
+            textposition='auto',
+            showlegend=False
+        ),
+        row=1, col=1
+    )
+    
+    # 파이 차트
+    preference_counts = df_with_pref['Investment_Preference'].value_counts()
+    fig.add_trace(
+        go.Pie(
+            labels=preference_counts.index,
+            values=preference_counts.values,
+            marker_colors=['#28a745', '#17a2b8', '#ffc107', '#dc3545'],
+        ),
+        row=1, col=2
+    )
+    
+    fig.update_layout(height=400, template="plotly_white")
+    return fig
+
 def plot_document_length_analysis(df):
     """문서 길이 분석"""
     df['Text_Length'] = df['Combined_Text'].str.len()
@@ -536,7 +579,7 @@ def main():
             st.write(f"총 종목 수: {df['Equity'].nunique()}")
             st.write(f"컬럼: {', '.join(df.columns.tolist())}")
         
-        if analyze_button:
+        if analyze_button or 'analysis_complete' not in st.session_state:
             st.session_state.analysis_complete = False
             
             with st.spinner("🔄 모델 로드 중..."):
@@ -667,8 +710,8 @@ def main():
             st.markdown("---")
             st.subheader("📈 센티먼트 분석 상세")
             
-            tab1, tab2, tab3, tab4, tab5, = st.tabs([
-                "센티먼트 분포", "종목 점수", "워드클라우드", "문서 분석", "상세 분석"
+            tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+                "센티먼트 분포", "종목 점수", "상위 종목 비교", "워드클라우드", "문서 분석", "상세 분석"
             ])
             
             with tab1:
@@ -691,6 +734,9 @@ def main():
                 Earnings call 및 재무 보고서는 일반적으로 중립적이거나 긍정적인 언어를 사용하는 경향이 있습니다. 
                 실제로 부정적인 내용도 완곡하게 표현되는 경우가 많아, 명확히 부정적인 점수(-0.2 이하)를 받는 경우는 드뭅니다.
                 """)
+            
+            with tab3:
+                st.plotly_chart(plot_top_equities_comparison(df), width="stretch")
 
             with tab4:
                 sentiment_pipeline = st.session_state.get('sentiment_pipeline')  # 이 줄 추가
@@ -821,10 +867,10 @@ def main():
                 
                 st.markdown("#### 🏆 종목 순위 및 포트폴리오 평가")
                 
-                display_ranking = equity_ranking[['Equity', 'Sentiment_Score', 'Sentiment', 
+                display_ranking = equity_ranking[['Sentiment_Score', 'Sentiment', 
                                                   'Document_Count', 'Sentiment_Grade', 
                                                   'Investment_Preference']].copy()
-                display_ranking.columns = ['종목', '센티먼트', '센티먼트 분류', '문서수', '등급', '투자선호도']
+                display_ranking.columns = ['센티먼트', '센티먼트 분류', '문서수', '등급', '투자선호도']
                 display_ranking = display_ranking.round(4)
                 
                 st.dataframe(
