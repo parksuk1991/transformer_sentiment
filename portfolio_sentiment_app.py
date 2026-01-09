@@ -867,10 +867,10 @@ def main():
                 
                 st.markdown("#### 🏆 종목 순위 및 포트폴리오 평가")
                 
-                display_ranking = equity_ranking[['Sentiment_Score', 'Sentiment', 
+                display_ranking = equity_ranking[['Equity', 'Sentiment_Score', 'Sentiment', 
                                                   'Document_Count', 'Sentiment_Grade', 
                                                   'Investment_Preference']].copy()
-                display_ranking.columns = ['센티먼트', '센티먼트 분류', '문서수', '등급', '투자선호도']
+                display_ranking.columns = ['종목', '센티먼트', '센티먼트 분류', '문서수', '등급', '투자선호도']
                 display_ranking = display_ranking.round(4)
                 
                 st.dataframe(
