@@ -846,7 +846,7 @@ def main():
                         )
             
                         text_data = ' '.join(df[df['Sentiment'] == sentiment_filter]['Combined_Text'].tolist())
-                        title = f"{sentiment_filter} - (Contribution Based)"
+                        title = f"{sentiment_filter} (Contribution Based)"
             
                         with st.spinner("분석 중..."):
                             wordcloud_fig = plot_sentiment_wordcloud(
