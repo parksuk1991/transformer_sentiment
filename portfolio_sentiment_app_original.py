@@ -117,21 +117,26 @@ def chunk_text(text, max_length=512):
 
 def analyze_sentiment_for_equity(text, sentiment_pipeline):
     """
-    종목별 전체 텍스트에 대한 센티먼트 분석
+    AI 가중평균 방식의 센티먼트 분석
     
-    점수 계산 방식:
+    작동 방식:
     1. 텍스트를 512토큰 단위로 청킹
-    2. 각 청크별로 FinBERT 모델이 POSITIVE/NEGATIVE/NEUTRAL 분류 + 신뢰도 점수(0~1) 반환
-    3. 최종 점수 = (긍정 청크 비율 × 평균 긍정 신뢰도) - (부정 청크 비율 × 평균 부정 신뢰도)
-    4. 범위: -1(완전 부정) ~ +1(완전 긍정)
+    2. 각 청크별로 FinBERT가 POSITIVE/NEGATIVE/NEUTRAL 분류 + 신뢰도 반환
+    3. 각 센티먼트의 신뢰도를 누적 (AI의 확신도를 그대로 반영)
+    4. 가장 높은 누적 신뢰도를 가진 센티먼트를 최종 선택
+    5. 최종 점수 = 해당 센티먼트의 신뢰도 비율 (0~1 범위)
     
-    분류 기준:
-    - POSITIVE: 점수 > 0.2 (긍정 기준선)
-    - NEGATIVE: 점수 < -0.2 (부정 기준선)
-    - NEUTRAL: -0.2 ≤ 점수 ≤ 0.2
+    예시:
+    - POSITIVE 청크들의 신뢰도 합: 45.2
+    - NEGATIVE 청크들의 신뢰도 합: 8.3
+    - NEUTRAL 청크들의 신뢰도 합: 22.1
+    - 총합: 75.6
+    - 최종: POSITIVE, 점수 = 45.2/75.6 = 0.598
     
-    참고: 실제 earnings call 텍스트는 대부분 중립적이거나 약간 긍정적인 경향이 있어
-          부정적 점수가 드물게 나타날 수 있습니다.
+    장점:
+    - 사람이 정한 임계값(±0.2) 없음
+    - AI 모델의 판단을 100% 신뢰
+    - 신뢰도 강도까지 반영 (0.95 긍정 > 0.55 긍정)
     """
     if not text or len(text.strip()) == 0:
         return "NEUTRAL", 0.0
@@ -139,42 +144,33 @@ def analyze_sentiment_for_equity(text, sentiment_pipeline):
     text = preprocess_text(text)
     chunks = chunk_text(text, max_length=512)
     
-    chunk_results = []
+    # 센티먼트별 신뢰도 누적
+    sentiment_scores = {'POSITIVE': 0.0, 'NEGATIVE': 0.0, 'NEUTRAL': 0.0}
+    
     for chunk in chunks:
         try:
             result = sentiment_pipeline(chunk, truncation=True, max_length=512)
-            chunk_results.append(result[0])
+            label = result[0]['label'].upper()  # 대소문자 통일
+            score = result[0]['score']  # AI의 신뢰도 (0~1)
+            
+            # AI의 신뢰도를 그대로 누적
+            if label in sentiment_scores:
+                sentiment_scores[label] += score
         except Exception as e:
             continue
     
-    if not chunk_results:
+    # 분석 실패 시 중립 반환
+    total_score = sum(sentiment_scores.values())
+    if total_score == 0:
         return "NEUTRAL", 0.0
     
-    # 감정 점수 집계
-    positive_scores = [r['score'] for r in chunk_results if r['label'] in ['POSITIVE', 'positive']]
-    negative_scores = [r['score'] for r in chunk_results if r['label'] in ['NEGATIVE', 'negative']]
-    neutral_scores = [r['score'] for r in chunk_results if r['label'] in ['NEUTRAL', 'neutral']]
+    # 가장 높은 누적 신뢰도를 가진 센티먼트 선택
+    final_sentiment = max(sentiment_scores, key=sentiment_scores.get)
     
-    # 최종 점수 계산 (-1 ~ 1 범위)
-    # 긍정/부정 청크의 평균 신뢰도와 비율을 모두 고려
-    avg_positive = np.mean(positive_scores) if positive_scores else 0
-    avg_negative = np.mean(negative_scores) if negative_scores else 0
+    # 최종 점수: 해당 센티먼트의 비율 (0~1)
+    final_score = sentiment_scores[final_sentiment] / total_score
     
-    positive_weight = len(positive_scores) / len(chunk_results)
-    negative_weight = len(negative_scores) / len(chunk_results)
-    
-    # 최종 점수: 긍정 기여도 - 부정 기여도
-    final_score = (avg_positive * positive_weight) - (avg_negative * negative_weight)
-    
-    # 감정 분류 (엄격한 기준)
-    if final_score > 0.2:
-        sentiment = "POSITIVE"
-    elif final_score < -0.2:
-        sentiment = "NEGATIVE"
-    else:
-        sentiment = "NEUTRAL"
-    
-    return sentiment, final_score
+    return final_sentiment, final_score
 
 def extract_keywords(text, n_words=15):
     """텍스트에서 주요 키워드 추출"""
@@ -201,17 +197,9 @@ def extract_keywords(text, n_words=15):
     return word_freq.most_common(n_words)
 
 def calculate_equity_ranking(equity_df):
-    """종목별 순위 계산"""
+    """종목별 순위 계산 (AI 기반 점수 사용)"""
     equity_df = equity_df.copy()
     equity_df['Portfolio_Score'] = equity_df['Sentiment_Score']
-    
-    equity_df['Sentiment_Grade'] = equity_df['Sentiment_Score'].apply(
-        lambda x: 'S' if x > 0.6 else ('A+' if x > 0.4 else ('A' if x > 0.2 else 
-                  ('B' if x > 0 else ('C' if x > -0.2 else ('D' if x > -0.4 else 'F')))))
-    )
-    
-    equity_df['Investment_Preference'] = equity_df['Sentiment_Score'].apply(
-        lambda x: 'Positive' if x > 0.4 else ('Decent' if x > 0.2 else ('Neutral' if x > -0.2 else 'Negaative')))
     
     return equity_df.sort_values('Portfolio_Score', ascending=False)
 
@@ -224,14 +212,14 @@ def plot_sentiment_distribution(df):
     colors = {
         'POSITIVE': '#28a745',
         'NEGATIVE': '#dc3545',
-        'NEUTRAL': '#6c757d'
+        'NEUTRAL': '#ffc107'
     }
     
     fig = go.Figure(data=[
         go.Bar(
             x=sentiment_counts.index,
             y=sentiment_counts.values,
-            marker=dict(color=[colors.get(x, '#6c757d') for x in sentiment_counts.index]),
+            marker=dict(color=[colors.get(x, '#ffc107') for x in sentiment_counts.index]),
             text=sentiment_counts.values,
             textposition='auto',
         )
@@ -248,40 +236,64 @@ def plot_sentiment_distribution(df):
     return fig
 
 def plot_equity_sentiment_scores(df):
-    """종목별 센티먼트 점수 시각화"""
+    """종목별 센티먼트 점수 시각화 (개선 버전)"""
     df_sorted = df.sort_values('Sentiment_Score', ascending=False)
     
-    colors = df_sorted['Sentiment_Score'].apply(
-        lambda x: '#28a745' if x > 0.2 else ('#dc3545' if x < -0.2 else '#6c757d')
+    # 센티먼트와 점수를 함께 표시하는 텍스트 생성
+    hover_text = df_sorted.apply(
+        lambda row: f"{row['Equity']}<br>"
+                   f"센티먼트: {row['Sentiment']}<br>"
+                   f"확신도: {row['Sentiment_Score']:.3f}<br>"
+                   f"(AI가 이 종목을 '{row['Sentiment']}'로 {row['Sentiment_Score']:.1%} 확신)",
+        axis=1
     )
+    
+    # 센티먼트에 따라 색상 지정
+    colors = df_sorted['Sentiment'].map({
+        'POSITIVE': '#28a745',
+        'NEGATIVE': '#dc3545',
+        'NEUTRAL': '#ffc107'
+    })
+    
+    # 텍스트 레이블 생성 (수정된 부분)
+    text_labels = [f"{score:.3f}<br>({sent})" 
+                   for score, sent in zip(df_sorted['Sentiment_Score'], df_sorted['Sentiment'])]
     
     fig = go.Figure(data=[
         go.Bar(
             x=df_sorted['Equity'],
             y=df_sorted['Sentiment_Score'],
             marker=dict(color=colors),
-            text=df_sorted['Sentiment_Score'].round(3),
+            text=text_labels,
             textposition='auto',
+            hovertext=hover_text,
+            hoverinfo='text',
         )
     ])
     
-    fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
-    fig.add_hline(y=0.2, line_dash="dot", line_color="green", opacity=0.3, 
-                  annotation_text="긍정 기준선 (0.2)")
-    fig.add_hline(y=-0.2, line_dash="dot", line_color="red", opacity=0.3,
-                  annotation_text="부정 기준선 (-0.2)")
-    
     fig.update_layout(
-        title="종목별 센티먼트 (높을수록 긍정적)<br><sub>긍정 기준: >0.2 | 부정 기준: <-0.2 | 중립: -0.2~0.2</sub>",
+        title="종목별 AI 센티먼트 분석 결과<br><sub>높을수록 AI가 해당 분류에 대해 확신 | 초록=긍정, 회색=중립, 빨강=부정</sub>",
         xaxis_title="종목",
-        yaxis_title="센티먼트",
+        yaxis_title="확신도 (0~1)",
         template="plotly_white",
         height=500,
-        showlegend=False
+        showlegend=False,
+        yaxis=dict(range=[0, 1])
+    )
+    
+    # 범례 역할을 하는 주석 추가
+    fig.add_annotation(
+        text="<b>색상 설명:</b><br>🟢 긍정(POSITIVE) | 🟡 중립(NEUTRAL) | 🔴 부정(NEGATIVE)",
+        xref="paper", yref="paper",
+        x=0.5, y=1.15,
+        showarrow=False,
+        font=dict(size=12),
+        bgcolor="rgba(255,255,255,0.8)",
+        bordercolor="#333",
+        borderwidth=1
     )
     
     return fig
-
 
 def extract_sentiment_contributing_words(text, sentiment_pipeline, target_sentiment, top_n=100):
     """
@@ -406,11 +418,6 @@ def plot_sentiment_wordcloud(text, sentiment, sentiment_pipeline, title="센티�
     
     return fig
 
-
-
-
-
-
 def plot_wordcloud(text, title="워드클라우드"):
     """워드클라우드 생성"""
     if not text or len(text.strip()) < 10:
@@ -433,49 +440,6 @@ def plot_wordcloud(text, title="워드클라우드"):
     
     return fig
 
-def plot_top_equities_comparison(df, top_n=10):
-    """상위 종목 비교 차트"""
-    # Investment_Preference 컬럼 추가
-    df_with_pref = df.copy()
-    df_with_pref['Investment_Preference'] = df_with_pref['Sentiment_Score'].apply(
-        lambda x: '강력 추천' if x > 0.4 else ('추천' if x > 0.2 else ('중립' if x > -0.2 else '회피'))
-    )
-    
-    df_top = df_with_pref.nlargest(top_n, 'Sentiment_Score')
-    
-    fig = make_subplots(
-        rows=1, cols=2,
-        subplot_titles=("센티먼트 Top 10", "투자 선호도 분포"),
-        specs=[[{"type": "bar"}, {"type": "pie"}]]
-    )
-    
-    # 막대 차트
-    fig.add_trace(
-        go.Bar(
-            x=df_top['Equity'],
-            y=df_top['Sentiment_Score'],
-            marker_color='lightblue',
-            text=df_top['Sentiment_Score'].round(3),
-            textposition='auto',
-            showlegend=False
-        ),
-        row=1, col=1
-    )
-    
-    # 파이 차트
-    preference_counts = df_with_pref['Investment_Preference'].value_counts()
-    fig.add_trace(
-        go.Pie(
-            labels=preference_counts.index,
-            values=preference_counts.values,
-            marker_colors=['#28a745', '#17a2b8', '#ffc107', '#dc3545'],
-        ),
-        row=1, col=2
-    )
-    
-    fig.update_layout(height=400, template="plotly_white")
-    return fig
-
 def plot_document_length_analysis(df):
     """문서 길이 분석"""
     df['Text_Length'] = df['Combined_Text'].str.len()
@@ -489,62 +453,73 @@ def plot_document_length_analysis(df):
         hover_data=['Equity'],
         title="문서 길이 vs 센티먼트",
         labels={'Text_Length': '문서 길이 (문자 수)', 'Sentiment_Score': '센티먼트'},
-        color_discrete_map={'POSITIVE': '#28a745', 'NEGATIVE': '#dc3545', 'NEUTRAL': '#6c757d'}
+        color_discrete_map={'POSITIVE': '#28a745', 'NEGATIVE': '#dc3545', 'NEUTRAL': '#ffc107'}
     )
     
     fig.update_layout(height=400, template="plotly_white")
     return fig
 
 def plot_sentiment_score_distribution(df):
-    """센티먼트 분포"""
+    """센티먼트 확신도 분포"""
     fig = go.Figure()
     
-    fig.add_trace(go.Histogram(
-        x=df['Sentiment_Score'],
-        nbinsx=30,
-        marker_color='lightblue',
-        opacity=0.7,
-    ))
+    # 센티먼트별로 히스토그램 생성
+    for sentiment, color in [('POSITIVE', '#28a745'), ('NEGATIVE', '#dc3545'), ('NEUTRAL', '#ffc107')]:
+        sentiment_data = df[df['Sentiment'] == sentiment]['Sentiment_Score']
+        if len(sentiment_data) > 0:
+            fig.add_trace(go.Histogram(
+                x=sentiment_data,
+                name=sentiment,
+                marker_color=color,
+                opacity=0.6,
+                nbinsx=20
+            ))
     
-    fig.add_vline(x=0, line_dash="dash", line_color="gray", opacity=0.5)
-    fig.add_vline(x=df['Sentiment_Score'].mean(), line_dash="dot", line_color="red", 
-                  annotation_text=f"평균: {df['Sentiment_Score'].mean():.3f}")
+    fig.add_vline(x=0.5, line_dash="dash", line_color="gray", opacity=0.5,
+                  annotation_text="중간값 (0.5)")
     
     fig.update_layout(
-        title="센티먼트 분포",
-        xaxis_title="센티먼트",
+        title="센티먼트별 확신도 분포<br><sub>AI가 각 센티먼트를 얼마나 확신했는지</sub>",
+        xaxis_title="확신도 (0~1)",
         yaxis_title="종목수",
         template="plotly_white",
-        height=400
+        height=400,
+        barmode='overlay',
+        showlegend=True,
+        xaxis=dict(range=[0, 1])
     )
     
     return fig
 
 def plot_sentiment_comparison_radar(df):
-    """센티먼트 상세 분석 차트"""
+    """센티먼트 상세 분석 차트 (개선 버전)"""
     top10 = df.nlargest(10, 'Sentiment_Score')
+    
+    # 센티먼트별 색상
+    colors = top10['Sentiment'].map({
+        'POSITIVE': '#28a745',
+        'NEGATIVE': '#dc3545',
+        'NEUTRAL': '#ffc107'
+    })
     
     fig = go.Figure(data=[
         go.Bar(
             x=top10['Equity'],
             y=top10['Sentiment_Score'],
-            marker=dict(
-                color=top10['Sentiment_Score'],
-                colorscale='RdYlGn',
-                showscale=True,
-                colorbar=dict(title="센티먼트")
-            ),
-            text=top10['Sentiment_Score'].round(3),
+            marker=dict(color=colors),
+            text=[f"{score:.3f}<br>({sent})" 
+                  for score, sent in zip(top10['Sentiment_Score'], top10['Sentiment'])],
             textposition='auto',
         )
     ])
     
     fig.update_layout(
-        title="상위 10개 종목 센티먼트 상세",
+        title="확신도 상위 10개 종목<br><sub>AI가 자신의 판단을 가장 확신하는 종목들</sub>",
         xaxis_title="종목",
-        yaxis_title="센티먼트",
+        yaxis_title="확신도",
         template="plotly_white",
-        height=500
+        height=500,
+        yaxis=dict(range=[0, 1])
     )
     
     return fig
@@ -579,7 +554,7 @@ def main():
             st.write(f"총 종목 수: {df['Equity'].nunique()}")
             st.write(f"컬럼: {', '.join(df.columns.tolist())}")
         
-        if analyze_button or 'analysis_complete' not in st.session_state:
+        if analyze_button:
             st.session_state.analysis_complete = False
             
             with st.spinner("🔄 모델 로드 중..."):
@@ -622,14 +597,12 @@ def main():
                     
                     # 동일 종목의 여러 Document 평균
                     avg_score = np.mean([r['score'] for r in doc_results])
-                    
-                    # 최종 감정 재분류
-                    if avg_score > 0.2:
-                        final_sentiment = "POSITIVE"
-                    elif avg_score < -0.2:
-                        final_sentiment = "NEGATIVE"
-                    else:
-                        final_sentiment = "NEUTRAL"
+
+                    # AI가 분류한 센티먼트를 다수결로 결정
+                    sentiments = [r['sentiment'] for r in doc_results]
+                    from collections import Counter
+                    sentiment_counts = Counter(sentiments)
+                    final_sentiment = sentiment_counts.most_common(1)[0][0]
                     
                     # 모든 텍스트 통합 (워드클라우드용)
                     all_text = ' '.join([r['text'] for r in doc_results])
@@ -724,16 +697,55 @@ def main():
                 
                 # 감정 분류 기준 설명 추가
                 st.info("""
-                **📌 센티먼트 분류 기준 **
-                
-                - **긍정 (POSITIVE)**: 센티먼트 > 0.2
-                - **중립 (NEUTRAL)**: -0.2 ≤ 센티먼트 ≤ 0.2  
-                - **부정 (NEGATIVE)**: 센티먼트 < -0.2
-                
-                **💡 부정적 종목이 적은 이유:**
-                Earnings call 및 재무 보고서는 일반적으로 중립적이거나 긍정적인 언어를 사용하는 경향이 있습니다. 
-                실제로 부정적인 내용도 완곡하게 표현되는 경우가 많아, 명확히 부정적인 점수(-0.2 이하)를 받는 경우는 드뭅니다.
+                **📌 AI 기반 센티먼트 분석 방식**
+
+                **색상 = AI가 분류한 센티먼트**
+                - 🟢 **초록색**: AI가 "긍정(POSITIVE)"으로 판단한 종목
+                - 🟡 **노란색**: AI가 "중립(NEUTRAL)"로 판단한 종목  
+                - 🔴 **빨간색**: AI가 "부정(NEGATIVE)"로 판단한 종목
+
+                **점수 의미 (0~1 범위)**:
+                - 점수는 AI가 해당 센티먼트에 대해 얼마나 확신하는지를 나타냅니다
+                - 0.8 이상: 매우 강한 확신
+                - 0.6~0.8: 강한 확신
+                - 0.5~0.6: 중간 확신
+                - 0.5 미만: 약한 확신
+    
+                **분류 방법**:
+                - FinBERT가 전체 문서를 분석하여 POSITIVE/NEGATIVE/NEUTRAL 중 가장 확신하는 것을 선택
+                - 사람이 정한 임계값이 아닌, AI의 순수한 판단을 100% 반영
+                - 각 청크의 신뢰도를 누적하여 최종 결정
+    
+                **💡 왜 이 방식이 더 나은가?**
+                금융 전문 AI 모델(FinBERT)은 수백만 개의 금융 문서로 학습되었습니다.
                 """)
+
+                # 구체적인 예시 추가
+                st.markdown("### 📊 실전 예시")
+    
+                example_positive = df[df['Sentiment'] == 'POSITIVE'].nlargest(1, 'Sentiment_Score')
+                example_neutral = df[df['Sentiment'] == 'NEUTRAL'].nlargest(1, 'Sentiment_Score') if 'NEUTRAL' in df['Sentiment'].values else None
+    
+                cols = st.columns(2)
+                with cols[0]:
+                    if not example_positive.empty:
+                        row = example_positive.iloc[0]
+                        st.success(f"""
+                        **✅ 긍정 예시: {row['Equity']}**
+                        - 센티먼트: POSITIVE (긍정)
+                        - 확신도: {row['Sentiment_Score']:.3f}
+                        - 해석: AI가 이 종목의 문서를 분석한 결과, {row['Sentiment_Score']*100:.1f}%의 확신으로 "긍정적"이라고 판단했습니다.
+                        """)
+                        
+                with cols[1]:
+                    if example_neutral is not None and not example_neutral.empty:
+                        row = example_neutral.iloc[0]
+                        st.warning(f"""
+                        **⚠️ 중립 예시: {row['Equity']}**
+                        - 센티먼트: NEUTRAL (중립)
+                        - 확신도: {row['Sentiment_Score']:.3f}
+                        - 해석: AI가 이 종목의 문서에서 긍정도 부정도 아닌 중립적인 내용을 {row['Sentiment_Score']*100:.1f}% 확신으로 판단했습니다.
+                        """)                
             
             with tab3:
                 sentiment_pipeline = st.session_state.get('sentiment_pipeline')  # 이 줄 추가
@@ -790,7 +802,6 @@ def main():
                             st.warning("워드클라우드를 생성할 텍스트가 없습니다.")
     
                 else:  # 센티먼트 기여도 기반
-                    st.info("⏳ AI 모델이 센티먼트에 실제로 기여한 단어를 분석 중입니다...")
         
                     if wc_option == "센티먼트별":
                         sentiment_filter = st.selectbox(
@@ -862,12 +873,17 @@ def main():
                 # 종목별 순위
                 equity_ranking = calculate_equity_ranking(df)
                 
-                st.markdown("#### 🏆 종목 순위 및 포트폴리오 평가")
+                st.markdown("#### 🏆 종목 순위 및 포트폴리오 분")
+                st.caption("""
+                💡 **테이블 설명**: 
+                - 센티먼트 열 = AI의 확신도 (높을수록 해당 분류에 확신)
+                - 센티먼트 분류 = AI가 판단한 긍정/중립/부정
+                - 문서수 = 해당 종목에 대한 분석 문서 개수
+                """)
                 
                 display_ranking = equity_ranking[['Equity', 'Sentiment_Score', 'Sentiment', 
-                                                  'Document_Count', 'Sentiment_Grade', 
-                                                  'Investment_Preference']].copy()
-                display_ranking.columns = ['종목', '센티먼트', '센티먼트 분류', '문서수', '등급', '투자선호도']
+                                                  'Document_Count']].copy()
+                display_ranking.columns = ['종목', '확신ㄷ노', '센티먼트 분류', '문서수']
                 display_ranking = display_ranking.round(4)
                 
                 st.dataframe(
@@ -968,9 +984,11 @@ def main():
         st.markdown("""
         - **FinBERT**: BERT를 금융 텍스트로 파인튜닝한 최신 모델
         - **Transformer Pipeline**: 고성능 센티먼트 분석
+        - **AI 가중평균 방식**: 모델의 신뢰도를 그대로 반영하여 더 정확한 분석
+        - **사람의 개입 최소화**: 임의의 임계값 없이 AI가 100% 판단
         - **Word Cloud**: 센티먼트별/종목별 주요 단어 시각화
         
-        이 모델들은 전통적 방식보다 훨씬 높은 정확도를 제공합니다.
+        이 방식은 전통적 방식이나 규칙 기반 방식보다 훨씬 높은 정확도를 제공합니다.
         """)
 
 if __name__ == "__main__":
