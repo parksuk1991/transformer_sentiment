@@ -433,49 +433,6 @@ def plot_wordcloud(text, title="워드클라우드"):
     
     return fig
 
-def plot_top_equities_comparison(df, top_n=10):
-    """상위 종목 비교 차트"""
-    # Investment_Preference 컬럼 추가
-    df_with_pref = df.copy()
-    df_with_pref['Investment_Preference'] = df_with_pref['Sentiment_Score'].apply(
-        lambda x: '강력 추천' if x > 0.4 else ('추천' if x > 0.2 else ('중립' if x > -0.2 else '회피'))
-    )
-    
-    df_top = df_with_pref.nlargest(top_n, 'Sentiment_Score')
-    
-    fig = make_subplots(
-        rows=1, cols=2,
-        subplot_titles=("센티먼트 Top 10", "투자 선호도 분포"),
-        specs=[[{"type": "bar"}, {"type": "pie"}]]
-    )
-    
-    # 막대 차트
-    fig.add_trace(
-        go.Bar(
-            x=df_top['Equity'],
-            y=df_top['Sentiment_Score'],
-            marker_color='lightblue',
-            text=df_top['Sentiment_Score'].round(3),
-            textposition='auto',
-            showlegend=False
-        ),
-        row=1, col=1
-    )
-    
-    # 파이 차트
-    preference_counts = df_with_pref['Investment_Preference'].value_counts()
-    fig.add_trace(
-        go.Pie(
-            labels=preference_counts.index,
-            values=preference_counts.values,
-            marker_colors=['#28a745', '#17a2b8', '#ffc107', '#dc3545'],
-        ),
-        row=1, col=2
-    )
-    
-    fig.update_layout(height=400, template="plotly_white")
-    return fig
-
 def plot_document_length_analysis(df):
     """문서 길이 분석"""
     df['Text_Length'] = df['Combined_Text'].str.len()
