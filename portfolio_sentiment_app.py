@@ -306,118 +306,134 @@ def extract_sentiment_contributing_words(text, sentiment_pipeline, target_sentim
     text = preprocess_text(text)
     chunks = chunk_text(text, max_length=512)
     
+    if not chunks:
+        return {}
+    
     # 각 청크에서 기여도 높은 단어 추출
     word_contributions = {}
     
     model = sentiment_pipeline.model
     tokenizer = sentiment_pipeline.tokenizer
     
-    # 센티먼트 레이블 매핑 수정
-    sentiment_map = {
-        'POSITIVE': ['positive', 'POSITIVE', 'pos'],
-        'NEGATIVE': ['negative', 'NEGATIVE', 'neg'],
-        'NEUTRAL': ['neutral', 'NEUTRAL']
-    }
+    matched_chunks = 0  # 디버깅용
     
     for chunk in chunks[:5]:  # 처리 시간을 위해 최대 5개 청크만
         try:
+            # 모델 예측
+            result = sentiment_pipeline(chunk, truncation=True, max_length=512)[0]
+            predicted_label = result['label']  # 원본 레이블 유지
+            
+            # 레이블 정규화 (FinBERT는 소문자, 일부 모델은 대문자 사용)
+            predicted_label_normalized = predicted_label.upper()
+            
+            # 타겟 센티먼트 매칭 (대소문자 무관하게)
+            if predicted_label_normalized != target_sentiment.upper():
+                continue
+            
+            matched_chunks += 1
+            
             # 토큰화
             inputs = tokenizer(chunk, return_tensors="pt", truncation=True, max_length=512)
             
             # 모델 예측
-            outputs = model(**inputs)
-            predictions = torch.nn.functional.softmax(outputs.logits, dim=-1)
-            
-            # 해당 센티먼트의 확률
-            result = sentiment_pipeline(chunk, truncation=True, max_length=512)[0]
-            predicted_label = result['label'].lower()  # 소문자로 통일
-            
-            # 타겟 센티먼트가 아니면 스킵 (수정된 부분)
-            target_labels = [label.lower() for label in sentiment_map[target_sentiment]]
-            if predicted_label not in target_labels:
-                continue
+            with torch.no_grad():
+                outputs = model(**inputs, output_attentions=True)
             
             # 토큰 추출
             tokens = tokenizer.convert_ids_to_tokens(inputs['input_ids'][0])
             
-            # Attention weights를 기여도 근사치로 사용
-            with torch.no_grad():
-                attention_outputs = model(**inputs, output_attentions=True)
-                if hasattr(attention_outputs, 'attentions') and attention_outputs.attentions:
-                    attention = attention_outputs.attentions
-                    # 마지막 레이어의 attention 평균
-                    avg_attention = attention[-1].mean(dim=1).squeeze()
-                    if avg_attention.dim() > 1:
-                        avg_attention = avg_attention.mean(dim=0)
-                else:
-                    # attention이 없으면 균등 가중치 사용
-                    avg_attention = torch.ones(len(tokens)) / len(tokens)
+            # Attention weights 추출
+            if hasattr(outputs, 'attentions') and outputs.attentions and len(outputs.attentions) > 0:
+                attention = outputs.attentions[-1]  # 마지막 레이어
+                avg_attention = attention.mean(dim=1).squeeze()
+                if avg_attention.dim() > 1:
+                    avg_attention = avg_attention.mean(dim=0)
+            else:
+                # attention이 없으면 균등 가중치
+                avg_attention = torch.ones(len(tokens)) / len(tokens)
             
             # 토큰별 기여도 집계
+            stop_words = {
+                'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+                'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+                'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+                'should', 'may', 'might', 'must', 'can', 'that', 'this', 'as', 'if',
+                'it', 'its', 'which', 'who', 'what', 'when', 'where', 'why', 'how',
+                'thank', 'thanks', 'think', 'year', 'we', 'our', 'us'
+            }
+            
             for token, weight in zip(tokens, avg_attention):
-                # 특수 토큰 및 서브워드 처리
+                # 특수 토큰 처리
                 if token.startswith('##'):
                     token = token[2:]
-                elif token in ['[CLS]', '[SEP]', '[PAD]', '<s>', '</s>', '<pad>']:
+                elif token in ['[CLS]', '[SEP]', '[PAD]', '<s>', '</s>', '<pad>', '[MASK]']:
                     continue
                 
                 token = token.lower().strip()
                 
-                # stop words 필터링
-                stop_words = {
-                    'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-                    'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
-                    'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
-                    'should', 'may', 'might', 'must', 'can', 'that', 'this', 'as', 'if',
-                    'it', 'its', 'which', 'who', 'what', 'when', 'where', 'why', 'how',
-                    'thank', 'thanks', 'think', 'year'
-                }
-                
-                if token in stop_words or len(token) < 3:
+                # 필터링
+                if token in stop_words or len(token) < 3 or not token.isalpha():
                     continue
                 
                 # 기여도 누적
+                weight_value = float(weight.item() if hasattr(weight, 'item') else weight)
                 if token in word_contributions:
-                    word_contributions[token] += float(weight)
+                    word_contributions[token] += weight_value
                 else:
-                    word_contributions[token] = float(weight)
+                    word_contributions[token] = weight_value
         
         except Exception as e:
-            print(f"청크 분석 중 오류: {e}")  # 디버깅용
+            print(f"청크 분석 중 오류: {str(e)}")
             continue
+    
+    print(f"[DEBUG] 타겟: {target_sentiment}, 매칭된 청크: {matched_chunks}/{len(chunks[:5])}, 추출 단어: {len(word_contributions)}")
+    
+    if not word_contributions:
+        return {}
     
     # 상위 N개 단어 반환
     sorted_words = sorted(word_contributions.items(), key=lambda x: x[1], reverse=True)
     return dict(sorted_words[:top_n])
 
+
 def plot_sentiment_wordcloud(text, sentiment, sentiment_pipeline, title="센티먼트 기여 워드클라우드"):
     """센티먼트 기여도 기반 워드클라우드 생성"""
     if not text or len(text.strip()) < 10:
+        print(f"[DEBUG] 텍스트 길이 부족: {len(text.strip()) if text else 0}")
         return None
     
     # 센티먼트에 기여한 단어 추출
     word_scores = extract_sentiment_contributing_words(text, sentiment_pipeline, sentiment, top_n=100)
     
-    if not word_scores:
+    print(f"[DEBUG] 추출된 단어 수: {len(word_scores)}")
+    
+    if not word_scores or len(word_scores) < 3:
+        print(f"[DEBUG] 단어 추출 실패 또는 부족: {list(word_scores.keys())[:10] if word_scores else '없음'}")
         return None
     
-    # WordCloud 생성 (빈도수 대신 기여도 사용)
-    wordcloud = WordCloud(
-        width=800,
-        height=400,
-        background_color='white',
-        colormap='RdYlGn' if sentiment == 'POSITIVE' else ('Reds_r' if sentiment == 'NEGATIVE' else 'Blues'),
-        max_words=80,
-        relative_scaling=0.5,
-        min_font_size=10
-    ).generate_from_frequencies(word_scores)
-    
-    fig, ax = plt.subplots(figsize=(12, 6))
-    ax.imshow(wordcloud, interpolation='bilinear')
-    ax.axis('off')
-    ax.set_title(title, fontsize=16, fontweight='bold')
-    
-    return fig
+    try:
+        # WordCloud 생성
+        colormap = 'RdYlGn' if sentiment == 'POSITIVE' else ('Reds_r' if sentiment == 'NEGATIVE' else 'Blues')
+        
+        wordcloud = WordCloud(
+            width=800,
+            height=400,
+            background_color='white',
+            colormap=colormap,
+            max_words=80,
+            relative_scaling=0.5,
+            min_font_size=10
+        ).generate_from_frequencies(word_scores)
+        
+        fig, ax = plt.subplots(figsize=(12, 6))
+        ax.imshow(wordcloud, interpolation='bilinear')
+        ax.axis('off')
+        ax.set_title(title, fontsize=16, fontweight='bold')
+        
+        return fig
+    except Exception as e:
+        print(f"[DEBUG] 워드클라우드 생성 오류: {str(e)}")
+        return None
 
 def plot_wordcloud(text, title="워드클라우드"):
     """워드클라우드 생성"""
