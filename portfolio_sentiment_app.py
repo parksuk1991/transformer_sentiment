@@ -298,15 +298,6 @@ def plot_equity_sentiment_scores(df):
 def extract_sentiment_contributing_words(text, sentiment_pipeline, target_sentiment, top_n=100):
     """
     SHAP을 사용하여 센티먼트에 실제로 기여한 단어 추출
-    
-    Args:
-        text: 분석할 텍스트
-        sentiment_pipeline: 센티먼트 파이프라인
-        target_sentiment: 'POSITIVE', 'NEGATIVE', 'NEUTRAL'
-        top_n: 추출할 상위 단어 수
-    
-    Returns:
-        dict: {단어: 기여도 점수}
     """
     if not text or len(text.strip()) < 10:
         return {}
@@ -321,10 +312,10 @@ def extract_sentiment_contributing_words(text, sentiment_pipeline, target_sentim
     model = sentiment_pipeline.model
     tokenizer = sentiment_pipeline.tokenizer
     
-    # 센티먼트 레이블 매핑
+    # 센티먼트 레이블 매핑 수정
     sentiment_map = {
-        'POSITIVE': ['positive', 'POSITIVE'],
-        'NEGATIVE': ['negative', 'NEGATIVE'],
+        'POSITIVE': ['positive', 'POSITIVE', 'pos'],
+        'NEGATIVE': ['negative', 'NEGATIVE', 'neg'],
         'NEUTRAL': ['neutral', 'NEUTRAL']
     }
     
@@ -338,27 +329,36 @@ def extract_sentiment_contributing_words(text, sentiment_pipeline, target_sentim
             predictions = torch.nn.functional.softmax(outputs.logits, dim=-1)
             
             # 해당 센티먼트의 확률
-            predicted_label = sentiment_pipeline(chunk, truncation=True, max_length=512)[0]['label']
+            result = sentiment_pipeline(chunk, truncation=True, max_length=512)[0]
+            predicted_label = result['label'].lower()  # 소문자로 통일
             
-            # 타겟 센티먼트가 아니면 스킵
-            if predicted_label not in sentiment_map[target_sentiment]:
+            # 타겟 센티먼트가 아니면 스킵 (수정된 부분)
+            target_labels = [label.lower() for label in sentiment_map[target_sentiment]]
+            if predicted_label not in target_labels:
                 continue
             
-            # SHAP 값 계산 (간소화 버전: attention weights 사용)
+            # 토큰 추출
             tokens = tokenizer.convert_ids_to_tokens(inputs['input_ids'][0])
             
             # Attention weights를 기여도 근사치로 사용
             with torch.no_grad():
-                attention = model(**inputs, output_attentions=True).attentions
-                # 마지막 레이어의 attention 평균
-                avg_attention = attention[-1].mean(dim=1).squeeze().mean(dim=0)
+                attention_outputs = model(**inputs, output_attentions=True)
+                if hasattr(attention_outputs, 'attentions') and attention_outputs.attentions:
+                    attention = attention_outputs.attentions
+                    # 마지막 레이어의 attention 평균
+                    avg_attention = attention[-1].mean(dim=1).squeeze()
+                    if avg_attention.dim() > 1:
+                        avg_attention = avg_attention.mean(dim=0)
+                else:
+                    # attention이 없으면 균등 가중치 사용
+                    avg_attention = torch.ones(len(tokens)) / len(tokens)
             
             # 토큰별 기여도 집계
             for token, weight in zip(tokens, avg_attention):
                 # 특수 토큰 및 서브워드 처리
                 if token.startswith('##'):
                     token = token[2:]
-                elif token in ['[CLS]', '[SEP]', '[PAD]']:
+                elif token in ['[CLS]', '[SEP]', '[PAD]', '<s>', '</s>', '<pad>']:
                     continue
                 
                 token = token.lower().strip()
@@ -383,6 +383,7 @@ def extract_sentiment_contributing_words(text, sentiment_pipeline, target_sentim
                     word_contributions[token] = float(weight)
         
         except Exception as e:
+            print(f"청크 분석 중 오류: {e}")  # 디버깅용
             continue
     
     # 상위 N개 단어 반환
