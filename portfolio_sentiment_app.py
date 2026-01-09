@@ -536,7 +536,7 @@ def main():
             st.write(f"총 종목 수: {df['Equity'].nunique()}")
             st.write(f"컬럼: {', '.join(df.columns.tolist())}")
         
-        if analyze_button or 'analysis_complete' not in st.session_state:
+        if analyze_button:
             st.session_state.analysis_complete = False
             
             with st.spinner("🔄 모델 로드 중..."):
