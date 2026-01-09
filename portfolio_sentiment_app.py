@@ -710,8 +710,8 @@ def main():
             st.markdown("---")
             st.subheader("📈 센티먼트 분석 상세")
             
-            tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-                "센티먼트 분포", "종목 점수", "상위 종목 비교", "워드클라우드", "문서 분석", "상세 분석"
+            tab1, tab2, tab3, tab4, tab5 = st.tabs([
+                "센티먼트 분포", "종목 점수", "워드클라우드", "문서 분석", "상세 분석"
             ])
             
             with tab1:
@@ -736,9 +736,6 @@ def main():
                 """)
             
             with tab3:
-                st.plotly_chart(plot_top_equities_comparison(df), width="stretch")
-
-            with tab4:
                 sentiment_pipeline = st.session_state.get('sentiment_pipeline')  # 이 줄 추가
                 st.markdown("### 워드클라우드 분석")
     
@@ -845,7 +842,7 @@ def main():
                         else:
                             st.warning("분석할 텍스트가 없습니다.")
             
-            with tab5:
+            with tab4:
                 st.plotly_chart(plot_document_length_analysis(df), width="stretch")
                 
                 # 통계 요약
@@ -859,7 +856,7 @@ def main():
                 with col3:
                     st.metric("최소 문서 길이", f"{df['Combined_Text'].str.len().min():.0f} 자")
             
-            with tab6:
+            with tab5:
                 st.markdown("### 📋 상세 분석")
                 
                 # 종목별 순위
