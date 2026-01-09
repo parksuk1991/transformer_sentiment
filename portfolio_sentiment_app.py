@@ -48,7 +48,7 @@ st.markdown("""
         font-weight: bold;
     }
     .neutral {
-        color: #ffc107; 
+        color: #ffc107;
         font-weight: bold;
     }
     .top-equity {
@@ -163,22 +163,12 @@ def analyze_sentiment_for_equity(text, sentiment_pipeline):
     total_score = sum(sentiment_scores.values())
     if total_score == 0:
         return "NEUTRAL", 0.0
-
-
-    # 청크 개수로 평균을 내어 정규화
-    num_chunks = len(chunk_results)
-    if num_chunks == 0:
-        return "NEUTRAL", 0.0
-
-    # 각 센티먼트의 평균 신뢰도
-    avg_sentiment_scores = {
-        k: v / num_chunks for k, v in sentiment_scores.items()
-    }
-
-    # 가장 높은 평균 신뢰도를 가진 센티먼트 선택
-    final_sentiment = max(avg_sentiment_scores, key=avg_sentiment_scores.get)
-    # 최종 점수: 해당 센티먼트의 평균 신뢰도 (0~1 범위로 정규화)
-    final_score = avg_sentiment_scores[final_sentiment]
+    
+    # 가장 높은 누적 신뢰도를 가진 센티먼트 선택
+    final_sentiment = max(sentiment_scores, key=sentiment_scores.get)
+    
+    # 최종 점수: 해당 센티먼트의 비율 (0~1)
+    final_score = sentiment_scores[final_sentiment] / total_score
     
     return final_sentiment, final_score
 
@@ -373,13 +363,9 @@ def extract_sentiment_contributing_words(text, sentiment_pipeline, target_sentim
             target_score = predictions[0][target_idx].item()
             
             # 타겟 센티먼트 확률이 0.3 이상이거나 예측 레이블이 일치하면 분석
-            is_predicted = predicted_label == target_label
-            is_confident = target_score >= 0.2
-            is_highest = target_score == max(predictions[0].tolist())
-
-            if not (is_predicted or is_confident or is_highest):
+            if target_score < 0.3 and predicted_label != target_label:
                 continue
-
+            
             # Attention weights를 기여도로 사용
             tokens = tokenizer.convert_ids_to_tokens(inputs['input_ids'][0])
             
@@ -643,34 +629,16 @@ def main():
                             'score': score,
                             'text': combined_text
                         })
+                    
+                    # 동일 종목의 여러 Document 평균
+                    avg_score = np.mean([r['score'] for r in doc_results])
 
-                    # 동일 종목의 여러 Document를 확신도 기반으로 집계
-                    if len(doc_results) == 1:
-                        # 문서가 1개면 그대로 사용
-                        final_sentiment = doc_results[0]['sentiment']
-                        final_score = doc_results[0]['score']
-                    else:
-                        # 여러 문서가 있으면 센티먼트별 가중 평균
-                        sentiment_weighted = {'POSITIVE': [], 'NEGATIVE': [], 'NEUTRAL': []}
-    
-                        for doc in doc_results:
-                            sent = doc['sentiment']
-                            score = doc['score']
-                            if sent in sentiment_weighted:
-                                sentiment_weighted[sent].append(score)
-    
-                        # 각 센티먼트의 평균 확신도 계산
-                        sentiment_avg = {}
-                        for sent, scores in sentiment_weighted.items():
-                            if scores:
-                                sentiment_avg[sent] = np.mean(scores)
-                            else:
-                                sentiment_avg[sent] = 0.0
-    
-                        # 가장 높은 평균 확신도를 가진 센티먼트 선택
-                        final_sentiment = max(sentiment_avg, key=sentiment_avg.get)
-                        final_score = sentiment_avg[final_sentiment]
-
+                    # AI가 분류한 센티먼트를 다수결로 결정
+                    sentiments = [r['sentiment'] for r in doc_results]
+                    from collections import Counter
+                    sentiment_counts = Counter(sentiments)
+                    final_sentiment = sentiment_counts.most_common(1)[0][0]
+                    
                     # 모든 텍스트 통합 (워드클라우드용)
                     all_text = ' '.join([r['text'] for r in doc_results])
                     
