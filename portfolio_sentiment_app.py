@@ -297,7 +297,7 @@ def plot_equity_sentiment_scores(df):
 
 def extract_sentiment_contributing_words(text, sentiment_pipeline, target_sentiment, top_n=100):
     """
-    SHAP을 사용하여 센티먼트에 실제로 기여한 단어 추출
+    센티먼트에 실제로 기여한 단어 추출 (개선 버전)
     
     Args:
         text: 분석할 텍스트
@@ -321,73 +321,108 @@ def extract_sentiment_contributing_words(text, sentiment_pipeline, target_sentim
     model = sentiment_pipeline.model
     tokenizer = sentiment_pipeline.tokenizer
     
-    # 센티먼트 레이블 매핑
+    # 센티먼트 레이블 매핑 (소문자로 통일)
     sentiment_map = {
-        'POSITIVE': ['positive', 'POSITIVE'],
-        'NEGATIVE': ['negative', 'NEGATIVE'],
-        'NEUTRAL': ['neutral', 'NEUTRAL']
+        'POSITIVE': 'positive',
+        'NEGATIVE': 'negative',
+        'NEUTRAL': 'neutral'
     }
     
-    for chunk in chunks[:5]:  # 처리 시간을 위해 최대 5개 청크만
+    target_label = sentiment_map.get(target_sentiment, target_sentiment.lower())
+    chunks_processed = 0
+    
+    for chunk in chunks[:10]:  # 더 많은 청크 처리
+        if not chunk or len(chunk.strip()) < 10:
+            continue
+            
         try:
             # 토큰화
-            inputs = tokenizer(chunk, return_tensors="pt", truncation=True, max_length=512)
+            inputs = tokenizer(chunk, return_tensors="pt", truncation=True, max_length=512, padding=True)
             
             # 모델 예측
-            outputs = model(**inputs)
+            with torch.no_grad():
+                outputs = model(**inputs, output_attentions=True)
+            
             predictions = torch.nn.functional.softmax(outputs.logits, dim=-1)
             
-            # 해당 센티먼트의 확률
-            predicted_label = sentiment_pipeline(chunk, truncation=True, max_length=512)[0]['label']
+            # 예측된 레이블과 확률
+            predicted_idx = predictions.argmax().item()
+            predicted_label = model.config.id2label[predicted_idx].lower()
+            predicted_score = predictions[0][predicted_idx].item()
             
-            # 타겟 센티먼트가 아니면 스킵
-            if predicted_label not in sentiment_map[target_sentiment]:
+            # 타겟 센티먼트에 대한 확률 (임계값 낮춤)
+            target_idx = None
+            for idx, label in model.config.id2label.items():
+                if label.lower() == target_label:
+                    target_idx = idx
+                    break
+            
+            if target_idx is None:
                 continue
             
-            # SHAP 값 계산 (간소화 버전: attention weights 사용)
+            target_score = predictions[0][target_idx].item()
+            
+            # 타겟 센티먼트 확률이 0.3 이상이거나 예측 레이블이 일치하면 분석
+            if target_score < 0.3 and predicted_label != target_label:
+                continue
+            
+            # Attention weights를 기여도로 사용
             tokens = tokenizer.convert_ids_to_tokens(inputs['input_ids'][0])
             
-            # Attention weights를 기여도 근사치로 사용
-            with torch.no_grad():
-                attention = model(**inputs, output_attentions=True).attentions
+            if outputs.attentions:
                 # 마지막 레이어의 attention 평균
-                avg_attention = attention[-1].mean(dim=1).squeeze().mean(dim=0)
-            
-            # 토큰별 기여도 집계
-            for token, weight in zip(tokens, avg_attention):
-                # 특수 토큰 및 서브워드 처리
-                if token.startswith('##'):
-                    token = token[2:]
-                elif token in ['[CLS]', '[SEP]', '[PAD]']:
-                    continue
+                avg_attention = outputs.attentions[-1].mean(dim=1).squeeze()
+                if avg_attention.dim() > 1:
+                    avg_attention = avg_attention.mean(dim=0)
                 
-                token = token.lower().strip()
+                # 토큰별 기여도 집계 (타겟 센티먼트 확률로 가중)
+                weight_multiplier = target_score
                 
-                # stop words 필터링
-                stop_words = {
-                    'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-                    'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
-                    'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
-                    'should', 'may', 'might', 'must', 'can', 'that', 'this', 'as', 'if',
-                    'it', 'its', 'which', 'who', 'what', 'when', 'where', 'why', 'how',
-                    'thank', 'thanks', 'think', 'year'
-                }
+                for token, weight in zip(tokens, avg_attention):
+                    # 특수 토큰 및 서브워드 처리
+                    if token.startswith('##'):
+                        token = token[2:]
+                    elif token in ['[CLS]', '[SEP]', '[PAD]', '<s>', '</s>', '<pad>']:
+                        continue
+                    
+                    token = token.lower().strip()
+                    
+                    # stop words 필터링
+                    stop_words = {
+                        'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+                        'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+                        'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+                        'should', 'may', 'might', 'must', 'can', 'that', 'this', 'as', 'if',
+                        'it', 'its', 'which', 'who', 'what', 'when', 'where', 'why', 'how',
+                        'thank', 'thanks', 'think', 'year', 'all', 'each', 'every'
+                    }
+                    
+                    if token in stop_words or len(token) < 3:
+                        continue
+                    
+                    # 기여도 누적 (타겟 센티먼트 확률로 가중)
+                    contribution = float(weight) * weight_multiplier
+                    
+                    if token in word_contributions:
+                        word_contributions[token] += contribution
+                    else:
+                        word_contributions[token] = contribution
                 
-                if token in stop_words or len(token) < 3:
-                    continue
-                
-                # 기여도 누적
-                if token in word_contributions:
-                    word_contributions[token] += float(weight)
-                else:
-                    word_contributions[token] = float(weight)
+                chunks_processed += 1
         
         except Exception as e:
             continue
     
+    # 처리된 청크가 없으면 빈 딕셔너리 반환
+    if chunks_processed == 0:
+        return {}
+    
     # 상위 N개 단어 반환
-    sorted_words = sorted(word_contributions.items(), key=lambda x: x[1], reverse=True)
-    return dict(sorted_words[:top_n])
+    if word_contributions:
+        sorted_words = sorted(word_contributions.items(), key=lambda x: x[1], reverse=True)
+        return dict(sorted_words[:top_n])
+    
+    return {}
 
 def plot_sentiment_wordcloud(text, sentiment, sentiment_pipeline, title="센티먼트 기여 워드클라우드"):
     """센티먼트 기여도 기반 워드클라우드 생성"""
