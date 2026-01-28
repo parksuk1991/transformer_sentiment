@@ -564,7 +564,15 @@ def plot_sentiment_comparison_radar(df):
 def main():
     st.title("📊 Portfolio Sentiment Analysis")
     st.markdown("Transformer 기반 텍스트 센티먼트")
-    
+
+     # session_state 초기화
+    if 'analysis_complete' not in st.session_state:
+        st.session_state.analysis_complete = False
+    if 'analysis_df' not in st.session_state:
+        st.session_state.analysis_df = None
+    if 'sentiment_pipeline' not in st.session_state:
+        st.session_state.sentiment_pipeline = None
+        
     # 사이드바 설정
     st.sidebar.markdown("## ⚙️ 설정")
     
@@ -795,6 +803,10 @@ def main():
                         
             with tab3:
                 sentiment_pipeline = st.session_state.get('sentiment_pipeline')  # 이 줄 추가
+                    # 만약 None이면 경고
+                if sentiment_pipeline is None:
+                    st.warning("⚠️ 먼저 센티먼트 분석을 실행해주세요.")
+                    st.stop()
                 st.markdown("### 워드클라우드 분석")
     
                 # 분석 모드 선택
