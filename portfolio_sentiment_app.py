@@ -297,16 +297,7 @@ def plot_equity_sentiment_scores(df):
 
 def extract_sentiment_contributing_words(text, sentiment_pipeline, target_sentiment, top_n=100):
     """
-    센티먼트에 실제로 기여한 단어 추출 (개선 버전)
-    
-    Args:
-        text: 분석할 텍스트
-        sentiment_pipeline: 센티먼트 파이프라인
-        target_sentiment: 'POSITIVE', 'NEGATIVE', 'NEUTRAL'
-        top_n: 추출할 상위 단어 수
-    
-    Returns:
-        dict: {단어: 기여도 점수}
+    센티먼트에 실제로 기여한 단어 추출 (개선 버전 - 더 관대한 필터링)
     """
     if not text or len(text.strip()) < 10:
         return {}
@@ -331,7 +322,11 @@ def extract_sentiment_contributing_words(text, sentiment_pipeline, target_sentim
     target_label = sentiment_map.get(target_sentiment, target_sentiment.lower())
     chunks_processed = 0
     
-    for chunk in chunks[:10]:  # 더 많은 청크 처리
+    # 🔥 디버깅용 로그 추가
+    print(f"\n[DEBUG] 타겟 센티먼트: {target_sentiment}")
+    print(f"[DEBUG] 전체 청크 수: {len(chunks)}")
+    
+    for idx, chunk in enumerate(chunks[:10]):  # 더 많은 청크 처리
         if not chunk or len(chunk.strip()) < 10:
             continue
             
@@ -350,20 +345,24 @@ def extract_sentiment_contributing_words(text, sentiment_pipeline, target_sentim
             predicted_label = model.config.id2label[predicted_idx].lower()
             predicted_score = predictions[0][predicted_idx].item()
             
-            # 타겟 센티먼트에 대한 확률 (임계값 낮춤)
+            # 타겟 센티먼트에 대한 확률
             target_idx = None
-            for idx, label in model.config.id2label.items():
+            for idx_label, label in model.config.id2label.items():
                 if label.lower() == target_label:
-                    target_idx = idx
+                    target_idx = idx_label
                     break
             
             if target_idx is None:
+                print(f"[WARNING] 타겟 레이블 '{target_label}' not found in model labels")
                 continue
             
             target_score = predictions[0][target_idx].item()
             
-            # 타겟 센티먼트 확률이 0.3 이상이거나 예측 레이블이 일치하면 분석
-            if target_score < 0.3 and predicted_label != target_label:
+            # 🔥 필터링 조건 완화: 0.2 이상이면 분석 (기존 0.3)
+            print(f"[DEBUG] Chunk {idx}: predicted={predicted_label}({predicted_score:.3f}), target={target_label}({target_score:.3f})")
+            
+            if target_score < 0.2 and predicted_label != target_label:
+                print(f"[SKIP] target_score={target_score:.3f} < 0.2")
                 continue
             
             # Attention weights를 기여도로 사용
@@ -376,7 +375,7 @@ def extract_sentiment_contributing_words(text, sentiment_pipeline, target_sentim
                     avg_attention = avg_attention.mean(dim=0)
                 
                 # 토큰별 기여도 집계 (타겟 센티먼트 확률로 가중)
-                weight_multiplier = target_score
+                weight_multiplier = max(target_score, 0.3)  # 🔥 최소 0.3 가중치 보장
                 
                 for token, weight in zip(tokens, avg_attention):
                     # 특수 토큰 및 서브워드 처리
@@ -409,19 +408,33 @@ def extract_sentiment_contributing_words(text, sentiment_pipeline, target_sentim
                         word_contributions[token] = contribution
                 
                 chunks_processed += 1
+                print(f"[SUCCESS] Chunk {idx} processed. Total words: {len(word_contributions)}")
         
         except Exception as e:
+            print(f"[ERROR] Chunk {idx}: {str(e)}")
             continue
     
-    # 처리된 청크가 없으면 빈 딕셔너리 반환
-    if chunks_processed == 0:
-        return {}
+    print(f"\n[RESULT] 처리된 청크: {chunks_processed}/{len(chunks)}")
+    print(f"[RESULT] 추출된 단어 수: {len(word_contributions)}")
+    
+    # 🔥 처리된 청크가 없으면 fallback: 빈도 기반으로 전환
+    if chunks_processed == 0 or len(word_contributions) == 0:
+        print("[FALLBACK] AI 기여도 추출 실패 -> 빈도 기반으로 전환")
+        return extract_keywords_fallback(text, n_words=top_n)
     
     # 상위 N개 단어 반환
     if word_contributions:
         sorted_words = sorted(word_contributions.items(), key=lambda x: x[1], reverse=True)
         return dict(sorted_words[:top_n])
     
+    return {}
+
+# 🔥 새로 추가: Fallback 함수
+def extract_keywords_fallback(text, n_words=100):
+    """AI 분석 실패 시 빈도 기반 키워드 추출"""
+    keywords = extract_keywords(text, n_words=n_words)
+    if keywords:
+        return dict(keywords)  # [(word, freq)] -> {word: freq}
     return {}
 
 def plot_sentiment_wordcloud(text, sentiment, sentiment_pipeline, title="센티먼트 기여 워드클라우드"):
@@ -860,6 +873,8 @@ def main():
                             st.warning("워드클라우드를 생성할 텍스트가 없습니다.")
     
                 else:  # 센티먼트 기여도 기반
+                            # 🔥 디버깅 모드 추가
+                    debug_mode = st.checkbox("🐛 디버그 모드 (콘솔 출력)", value=False)
         
                     if wc_option == "센티먼트별":
                         sentiment_filter = st.selectbox(
@@ -870,7 +885,9 @@ def main():
             
                         text_data = ' '.join(df[df['Sentiment'] == sentiment_filter]['Combined_Text'].tolist())
                         title = f"{sentiment_filter} (Contribution Based)"
-            
+
+                                    # 🔥 텍스트 길이 확인
+                        st.info(f"📝 분석 대상 텍스트 길이: {len(text_data)} 문자")
                         with st.spinner("분석 중..."):
                             wordcloud_fig = plot_sentiment_wordcloud(
                                 text_data, 
@@ -883,8 +900,14 @@ def main():
                             st.pyplot(wordcloud_fig, use_container_width=True)
                             st.caption("💡 단어 크기 = 해당 센티먼트 분류에 대한 AI 모델의 기여도")
                         else:
-                            st.warning("분석할 텍스트가 없습니다.")
-        
+                            st.warning("⚠️ AI 분석 실패 - 아래 '빈도 기반' 모드를 사용해보세요.")
+                
+                            # 🔥 자동으로 빈도 기반 워드클라우드 표시
+                            st.markdown("**대안: 빈도 기반 워드클라우드**")
+                            wordcloud_fig_fallback = plot_wordcloud(text_data, f"{sentiment_filter} (Frequency-Based)")
+                            if wordcloud_fig_fallback:
+                                st.pyplot(wordcloud_fig_fallback, use_container_width=True)
+                    
                     else:  # 종목별
                         equity_filter = st.selectbox(
                             "종목 선택",
@@ -896,7 +919,10 @@ def main():
                         text_data = equity_data['Combined_Text']
                         sentiment = equity_data['Sentiment']
                         title = f"{equity_filter} - {sentiment} (Contribution Based)"
-            
+                        
+                        # 🔥 텍스트 길이 확인
+                        st.info(f"📝 분석 대상 텍스트 길이: {len(text_data)} 문자")
+
                         with st.spinner("분석 중..."):
                             wordcloud_fig = plot_sentiment_wordcloud(
                                 text_data,
@@ -909,7 +935,13 @@ def main():
                             st.pyplot(wordcloud_fig, use_container_width=True)
                             st.caption("💡 이 종목이 해당 센티먼트로 분류된 이유가 되는 핵심 단어들입니다.")
                         else:
-                            st.warning("분석할 텍스트가 없습니다.")
+                            st.warning("⚠️ AI 분석 실패 - 아래 '빈도 기반' 모드를 사용해보세요.")
+                
+                            # 🔥 자동으로 빈도 기반 워드클라우드 표시
+                            st.markdown("**대안: 빈도 기반 워드클라우드**")
+                            wordcloud_fig_fallback = plot_wordcloud(text_data, f"{equity_filter} (Frequency-Based)")
+                            if wordcloud_fig_fallback:
+                                st.pyplot(wordcloud_fig_fallback, use_container_width=True)
             
             with tab4:
                 st.plotly_chart(plot_document_length_analysis(df), width="stretch")
